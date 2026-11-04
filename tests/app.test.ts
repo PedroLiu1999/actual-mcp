@@ -315,10 +315,12 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     };
 
     const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
 
     const listRes = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -341,6 +343,7 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     const callRes = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -396,10 +399,12 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     };
 
     const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
 
     const listRes = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -422,6 +427,7 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     const callRes = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -505,10 +511,12 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     };
 
     const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
 
     const listRes = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -531,6 +539,7 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     const monthsRes = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -551,6 +560,7 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     const monthSummaryRes = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -617,10 +627,12 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     };
 
     const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
 
     const listRes = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -643,6 +655,7 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     const callRes = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -703,6 +716,7 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     const invalidLimitRes = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({

@@ -1,7 +1,12 @@
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import type { Express } from 'express';
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
-import { loadConfig } from '../src/config.js';
+import { loadConfig, type AppConfig } from '../src/config.js';
 import type { AccountSummary, BudgetGateway, BudgetReadiness } from '../src/gateway/types.js';
 
 function createStubGateway(overrides: {
@@ -37,17 +42,62 @@ function createStubGateway(overrides: {
   };
 }
 
-const testConfig = loadConfig({
-  PUBLIC_URL: 'https://mcp.example.com',
-  PORT: '3000',
-  DATA_DIR: '/tmp/actual-mcp-test-data',
-  OAUTH_CLIENT_ID: 'gemini-client',
-  OAUTH_CLIENT_SECRET: 'super-secret',
-  OAUTH_ADMIN_PASSWORD: 'admin-password',
-  ACTUAL_SERVER_URL: 'http://localhost:5006',
-  ACTUAL_PASSWORD: 'actual-password',
-  ACTUAL_SYNC_ID: '11111111-2222-3333-4444-555555555555',
+let tempDataDir: string;
+let testConfig: AppConfig;
+
+beforeEach(() => {
+  tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-mcp-app-test-'));
+  testConfig = loadConfig({
+    PUBLIC_URL: 'https://mcp.example.com',
+    PORT: '3000',
+    DATA_DIR: tempDataDir,
+    OAUTH_CLIENT_ID: 'gemini-client',
+    OAUTH_CLIENT_SECRET: 'super-secret',
+    OAUTH_ADMIN_PASSWORD: 'admin-password',
+    ACTUAL_SERVER_URL: 'http://localhost:5006',
+    ACTUAL_PASSWORD: 'actual-password',
+    ACTUAL_SYNC_ID: '11111111-2222-3333-4444-555555555555',
+  });
 });
+
+afterEach(() => {
+  fs.rmSync(tempDataDir, { recursive: true, force: true });
+});
+
+async function issueBearerToken(app: Express): Promise<string> {
+  const redirectUri = 'https://oauth-redirect.googleusercontent.com/r/app-test';
+  const codeVerifier = 'app-test-pkce-verifier-with-sufficient-entropy-0123456789';
+  const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
+
+  const authRes = await request(app)
+    .post('/authorize')
+    .set('Host', 'mcp.example.com')
+    .type('form')
+    .send({
+      response_type: 'code',
+      client_id: testConfig.OAUTH_CLIENT_ID,
+      redirect_uri: redirectUri,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
+      password: testConfig.OAUTH_ADMIN_PASSWORD,
+    });
+
+  const code = new URL(authRes.headers.location).searchParams.get('code')!;
+  const tokenRes = await request(app)
+    .post('/token')
+    .set('Host', 'mcp.example.com')
+    .type('form')
+    .send({
+      grant_type: 'authorization_code',
+      client_id: testConfig.OAUTH_CLIENT_ID,
+      client_secret: testConfig.OAUTH_CLIENT_SECRET,
+      code,
+      code_verifier: codeVerifier,
+      redirect_uri: redirectUri,
+    });
+
+  return tokenRes.body.access_token as string;
+}
 
 describe('HTTP application seam — healthz & host validation', () => {
   it('enables reverse proxy trust (trust proxy: 1)', () => {
@@ -103,10 +153,12 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
 
   it('handles initialize on POST /mcp as stateless JSON response without Mcp-Session-Id', async () => {
     const app = createApp({ config: testConfig, budgetGateway: createStubGateway() });
+    const token = await issueBearerToken(app);
 
     const res = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -131,10 +183,12 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
 
   it('exposes list_accounts with readOnlyHint: true and destructiveHint: false on tools/list', async () => {
     const app = createApp({ config: testConfig, budgetGateway: createStubGateway() });
+    const token = await issueBearerToken(app);
 
     const res = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -187,10 +241,12 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     };
 
     const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
 
     const res = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -234,6 +290,451 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
         },
       ],
     });
+  });
+
+  it('exposes list_categories with readOnlyHint: true and destructiveHint: false and returns category groups and categories', async () => {
+    const gateway: BudgetGateway = {
+      ...createStubGateway(),
+      listCategories: async () => [
+        {
+          id: 'grp-expenses',
+          name: 'Usual Expenses',
+          is_income: false,
+          hidden: false,
+          categories: [
+            {
+              id: 'cat-food',
+              name: 'Food',
+              group_id: 'grp-expenses',
+              is_income: false,
+              hidden: false,
+            },
+          ],
+        },
+      ],
+    };
+
+    const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
+
+    const listRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 10,
+        method: 'tools/list',
+        params: {},
+      });
+
+    expect(listRes.status).toBe(200);
+    const tool = listRes.body.result.tools.find(
+      (t: { name: string }) => t.name === 'list_categories',
+    );
+    expect(tool).toBeDefined();
+    expect(tool.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+    });
+
+    const callRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 11,
+        method: 'tools/call',
+        params: {
+          name: 'list_categories',
+          arguments: {},
+        },
+      });
+
+    expect(callRes.status).toBe(200);
+    expect(callRes.body.result.isError).toBeFalsy();
+    const parsed = JSON.parse(callRes.body.result.content[0].text);
+    expect(parsed).toEqual({
+      categoryGroups: [
+        {
+          id: 'grp-expenses',
+          name: 'Usual Expenses',
+          is_income: false,
+          hidden: false,
+          categories: [
+            {
+              id: 'cat-food',
+              name: 'Food',
+              group_id: 'grp-expenses',
+              is_income: false,
+              hidden: false,
+            },
+          ],
+        },
+      ],
+      categories: [
+        {
+          id: 'cat-food',
+          name: 'Food',
+          group_id: 'grp-expenses',
+          is_income: false,
+          hidden: false,
+        },
+      ],
+    });
+  });
+
+  it('exposes list_payees with readOnlyHint: true and destructiveHint: false and returns payees', async () => {
+    const gateway: BudgetGateway = {
+      ...createStubGateway(),
+      listPayees: async () => [
+        { id: 'payee-1', name: 'Whole Foods', transfer_acct: null },
+        { id: 'payee-2', name: 'Transfer : Savings', transfer_acct: 'acc-savings' },
+      ],
+    };
+
+    const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
+
+    const listRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 12,
+        method: 'tools/list',
+        params: {},
+      });
+
+    expect(listRes.status).toBe(200);
+    const tool = listRes.body.result.tools.find(
+      (t: { name: string }) => t.name === 'list_payees',
+    );
+    expect(tool).toBeDefined();
+    expect(tool.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+    });
+
+    const callRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 13,
+        method: 'tools/call',
+        params: {
+          name: 'list_payees',
+          arguments: {},
+        },
+      });
+
+    expect(callRes.status).toBe(200);
+    expect(callRes.body.result.isError).toBeFalsy();
+    const parsed = JSON.parse(callRes.body.result.content[0].text);
+    expect(parsed).toEqual({
+      payees: [
+        { id: 'payee-1', name: 'Whole Foods', transfer_acct: null },
+        { id: 'payee-2', name: 'Transfer : Savings', transfer_acct: 'acc-savings' },
+      ],
+    });
+  });
+
+  it('exposes list_budget_months and get_budget_month with readOnlyHint: true and destructiveHint: false and returns Decimal Amounts', async () => {
+    let requestedMonth: string | undefined;
+    const gateway: BudgetGateway = {
+      ...createStubGateway(),
+      listBudgetMonths: async () => ['2026-09', '2026-10', '2026-11'],
+      getBudgetMonth: async (month) => {
+        requestedMonth = month;
+        return {
+          month,
+          incomeAvailable: 5000,
+          lastMonthOverspent: 0,
+          forNextMonth: 0,
+          totalBudgeted: -2500.5,
+          toBudget: 2499.5,
+          fromLastMonth: 0,
+          totalIncome: 5000,
+          totalSpent: -1420.25,
+          totalBalance: 1080.25,
+          categoryGroups: [
+            {
+              id: 'grp-living',
+              name: 'Living',
+              is_income: false,
+              hidden: false,
+              budgeted: 600,
+              spent: -420.25,
+              balance: 179.75,
+              categories: [
+                {
+                  id: 'cat-groceries',
+                  name: 'Groceries',
+                  group_id: 'grp-living',
+                  is_income: false,
+                  hidden: false,
+                  budgeted: 600,
+                  spent: -420.25,
+                  balance: 179.75,
+                  carryover: true,
+                },
+              ],
+            },
+          ],
+          categories: [
+            {
+              id: 'cat-groceries',
+              name: 'Groceries',
+              group_id: 'grp-living',
+              is_income: false,
+              hidden: false,
+              budgeted: 600,
+              spent: -420.25,
+              balance: 179.75,
+              carryover: true,
+            },
+          ],
+        };
+      },
+    };
+
+    const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
+
+    const listRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 14,
+        method: 'tools/list',
+        params: {},
+      });
+
+    expect(listRes.status).toBe(200);
+    for (const toolName of ['list_budget_months', 'get_budget_month']) {
+      const tool = listRes.body.result.tools.find((t: { name: string }) => t.name === toolName);
+      expect(tool).toBeDefined();
+      expect(tool.annotations).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+      });
+    }
+
+    const monthsRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 15,
+        method: 'tools/call',
+        params: {
+          name: 'list_budget_months',
+          arguments: {},
+        },
+      });
+
+    expect(monthsRes.status).toBe(200);
+    expect(JSON.parse(monthsRes.body.result.content[0].text)).toEqual({
+      months: ['2026-09', '2026-10', '2026-11'],
+    });
+
+    const monthSummaryRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 16,
+        method: 'tools/call',
+        params: {
+          name: 'get_budget_month',
+          arguments: { month: '2026-11' },
+        },
+      });
+
+    expect(monthSummaryRes.status).toBe(200);
+    expect(requestedMonth).toBe('2026-11');
+    const summaryParsed = JSON.parse(monthSummaryRes.body.result.content[0].text);
+    expect(summaryParsed).toMatchObject({
+      month: '2026-11',
+      toBudget: 2499.5,
+      totalIncome: 5000,
+      totalBudgeted: -2500.5,
+      totalSpent: -1420.25,
+      totalBalance: 1080.25,
+      categories: [
+        {
+          id: 'cat-groceries',
+          name: 'Groceries',
+          group_id: 'grp-living',
+          is_income: false,
+          hidden: false,
+          budgeted: 600,
+          spent: -420.25,
+          balance: 179.75,
+          carryover: true,
+        },
+      ],
+    });
+  });
+
+  it('exposes get_transactions with readOnlyHint: true and destructiveHint: false, forwards filters, and enforces limit <= 500', async () => {
+    let capturedFilters: unknown;
+    const gateway: BudgetGateway = {
+      ...createStubGateway(),
+      getTransactions: async (filters) => {
+        capturedFilters = filters;
+        return [
+          {
+            id: 'tx-1',
+            account: 'acc-checking',
+            accountId: 'acc-checking',
+            accountName: 'Main Checking',
+            date: '2026-11-01',
+            amount: -84.5,
+            payee: 'payee-trader-joes',
+            payeeId: 'payee-trader-joes',
+            payeeName: "Trader Joe's",
+            category: 'cat-groceries',
+            categoryId: 'cat-groceries',
+            categoryName: 'Groceries',
+            notes: 'Weekly produce haul',
+            cleared: true,
+          },
+        ];
+      },
+    };
+
+    const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
+
+    const listRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 17,
+        method: 'tools/list',
+        params: {},
+      });
+
+    expect(listRes.status).toBe(200);
+    const tool = listRes.body.result.tools.find(
+      (t: { name: string }) => t.name === 'get_transactions',
+    );
+    expect(tool).toBeDefined();
+    expect(tool.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+    });
+
+    const callRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 18,
+        method: 'tools/call',
+        params: {
+          name: 'get_transactions',
+          arguments: {
+            accountId: 'acc-checking',
+            startDate: '2026-11-01',
+            endDate: '2026-11-30',
+            categoryId: 'cat-groceries',
+            payeeId: 'payee-trader-joes',
+            searchText: 'produce',
+            limit: 50,
+            forceSync: true,
+          },
+        },
+      });
+
+    expect(callRes.status).toBe(200);
+    expect(callRes.body.result.isError).toBeFalsy();
+    expect(capturedFilters).toEqual({
+      accountId: 'acc-checking',
+      startDate: '2026-11-01',
+      endDate: '2026-11-30',
+      categoryId: 'cat-groceries',
+      payeeId: 'payee-trader-joes',
+      searchText: 'produce',
+      limit: 50,
+      forceSync: true,
+    });
+
+    const parsed = JSON.parse(callRes.body.result.content[0].text);
+    expect(parsed).toEqual({
+      transactions: [
+        {
+          id: 'tx-1',
+          account: 'acc-checking',
+          accountId: 'acc-checking',
+          accountName: 'Main Checking',
+          date: '2026-11-01',
+          amount: -84.5,
+          payee: 'payee-trader-joes',
+          payeeId: 'payee-trader-joes',
+          payeeName: "Trader Joe's",
+          category: 'cat-groceries',
+          categoryId: 'cat-groceries',
+          categoryName: 'Groceries',
+          notes: 'Weekly produce haul',
+          cleared: true,
+        },
+      ],
+    });
+
+    // Rejects limit > 500 via Zod input validation
+    const invalidLimitRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 19,
+        method: 'tools/call',
+        params: {
+          name: 'get_transactions',
+          arguments: {
+            limit: 501,
+          },
+        },
+      });
+
+    expect(invalidLimitRes.status).toBe(200);
+    expect(
+      invalidLimitRes.body.error || invalidLimitRes.body.result?.isError,
+    ).toBeTruthy();
   });
 });
 

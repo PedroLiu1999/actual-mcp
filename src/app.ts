@@ -1,6 +1,19 @@
+import { metadataHandler } from '@modelcontextprotocol/sdk/server/auth/handlers/metadata.js';
+import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
+import {
+  createOAuthMetadata,
+  getOAuthProtectedResourceMetadataUrl,
+  mcpAuthRouter,
+} from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { hostHeaderValidation } from '@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import express, { type Express } from 'express';
+import type {
+  OAuthMetadata,
+  OAuthProtectedResourceMetadata,
+} from '@modelcontextprotocol/sdk/shared/auth.js';
+import express, { type Express, type RequestHandler } from 'express';
+import { rateLimit } from 'express-rate-limit';
+import { EmbeddedOAuthProvider } from './auth/provider.js';
 import type { AppConfig } from './config.js';
 import type { BudgetGateway } from './gateway/types.js';
 import { createMcpServer } from './mcp/server.js';
@@ -9,6 +22,36 @@ export interface CreateAppOptions {
   config: AppConfig;
   budgetGateway: BudgetGateway;
 }
+
+const basicClientAuthShim: RequestHandler = (req, _res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.toLowerCase().startsWith('basic ')) {
+    next();
+    return;
+  }
+
+  if (!req.body || typeof req.body !== 'object') {
+    req.body = {};
+  }
+
+  if (req.body.client_id === undefined) {
+    try {
+      const encoded = authHeader.slice(6).trim();
+      const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+      const colonIndex = decoded.indexOf(':');
+      if (colonIndex !== -1) {
+        const rawClientId = decoded.slice(0, colonIndex);
+        const rawClientSecret = decoded.slice(colonIndex + 1);
+        req.body.client_id = decodeURIComponent(rawClientId);
+        req.body.client_secret = decodeURIComponent(rawClientSecret);
+      }
+    } catch {
+      // Fall through and let downstream client authentication reject malformed credentials
+    }
+  }
+
+  next();
+};
 
 export function createApp({ config, budgetGateway }: CreateAppOptions): Express {
   const app = express();
@@ -22,6 +65,84 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
   app.use(hostHeaderValidation(allowedHosts));
   app.use(express.json());
 
+  const issuerUrl = new URL(config.PUBLIC_URL);
+  const resourceServerUrl = new URL(`${config.PUBLIC_URL}/mcp`);
+  const scopesSupported = ['mcp:tools'];
+  const oauthProvider = new EmbeddedOAuthProvider(config);
+
+  const oauthMetadata: OAuthMetadata = {
+    ...createOAuthMetadata({
+      provider: oauthProvider,
+      issuerUrl,
+      scopesSupported,
+    }),
+    issuer: config.PUBLIC_URL,
+    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+    revocation_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+  };
+
+  const protectedResourceMetadata: OAuthProtectedResourceMetadata = {
+    resource: resourceServerUrl.href,
+    authorization_servers: [config.PUBLIC_URL],
+    scopes_supported: scopesSupported,
+    bearer_methods_supported: ['header'],
+    resource_name: 'Actual Budget MCP Server',
+  };
+
+  app.use(
+    '/.well-known/oauth-protected-resource/mcp',
+    metadataHandler(protectedResourceMetadata),
+  );
+  app.use(
+    '/.well-known/oauth-protected-resource',
+    metadataHandler(protectedResourceMetadata),
+  );
+  app.use(
+    '/.well-known/oauth-authorization-server',
+    metadataHandler(oauthMetadata),
+  );
+
+  const authorizePostLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  app.post('/authorize', authorizePostLimiter);
+
+  app.use('/authorize', express.urlencoded({ extended: false }), (req, _res, next) => {
+    if (req.method === 'POST') {
+      req.body = {
+        response_type: 'code',
+        code_challenge_method: 'S256',
+        ...req.query,
+        ...(typeof req.body === 'object' && req.body !== null ? req.body : {}),
+      };
+    }
+    const candidate = req.method === 'POST' ? req.body?.redirect_uri : req.query?.redirect_uri;
+    oauthProvider.recordCandidateRedirectUri(candidate);
+    next();
+  });
+
+  app.use('/token', express.urlencoded({ extended: false }), basicClientAuthShim);
+  app.use('/revoke', express.urlencoded({ extended: false }), basicClientAuthShim);
+
+  app.use(
+    mcpAuthRouter({
+      provider: oauthProvider,
+      issuerUrl,
+      resourceServerUrl,
+      scopesSupported,
+      resourceName: 'Actual Budget MCP Server',
+    }),
+  );
+
+  const bearerAuth = requireBearerAuth({
+    verifier: oauthProvider,
+    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceServerUrl),
+  });
+
   app.get('/healthz', (_req, res) => {
     const readiness = budgetGateway.getReadiness();
     res.status(200).json({
@@ -30,7 +151,7 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
     });
   });
 
-  app.post('/mcp', async (req, res) => {
+  app.post('/mcp', bearerAuth, async (req, res) => {
     const server = createMcpServer(budgetGateway);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

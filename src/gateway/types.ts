@@ -16,4 +16,7 @@ export interface BudgetReadiness {
 export interface BudgetGateway {
   getReadiness(): BudgetReadiness;
   listAccounts(options?: { forceSync?: boolean }): Promise<AccountSummary[]>;
+  initialize?(): Promise<void>;
+  sync?(): Promise<void>;
+  shutdown?(): Promise<void>;
 }

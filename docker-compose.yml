@@ -1,5 +1,6 @@
 services:
   actual-mcp:
+    image: ghcr.io/pedroliu1999/actual-mcp:${ACTUAL_MCP_VERSION:-latest}
     build:
       context: .
       dockerfile: Dockerfile

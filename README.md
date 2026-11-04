@@ -114,6 +114,7 @@ Copy `.env.example` to `.env` (or run `./scripts/setup-wizard.sh`):
 | :--- | :---: | :--- | :--- |
 | `PUBLIC_URL` | **Yes** | — | Public HTTPS origin exposed by your Cloudflare Tunnel (e.g. `https://actual-mcp.example.com`, no trailing slash). |
 | `PORT` | No | `3000` | Port the HTTP server listens on inside the container (and host loopback port in `docker-compose.yml`). |
+| `ACTUAL_MCP_VERSION` | No | `latest` | Tag of the pre-built Docker image from GitHub Container Registry (`ghcr.io/pedroliu1999/actual-mcp`). |
 | `DATA_DIR` | **Yes** | `/data` | Path to the persistent directory storing `oauth-tokens.json` (**Token Store**) and `budget-cache/` (**Budget Cache**). |
 | `OAUTH_CLIENT_ID` | **Yes** | — | Pre-registered OAuth 2.1 `Client ID` to enter in Google Gemini. |
 | `OAUTH_CLIENT_SECRET` | **Yes** | — | Pre-registered OAuth 2.1 `Client Secret` to enter in Google Gemini (e.g. `openssl rand -hex 32`). |
@@ -166,7 +167,16 @@ openssl rand -hex 32
   - If `actual-server` uses a self-signed certificate over HTTPS, either connect over local HTTP via `host.docker.internal` or mount the CA certificate and set `NODE_EXTRA_CA_CERTS`.
 - Set `ACTUAL_PASSWORD` to your Actual server password and `ACTUAL_SYNC_ID` to your budget's **Sync ID** (*Settings → Show advanced settings → Sync ID* in the Actual UI).
 
-### Step 2: Build & Start the Container
+### Step 2: Start the Container
+
+To run using the official prebuilt image from GitHub Container Registry:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Or build locally from source:
 
 ```bash
 docker compose up -d --build

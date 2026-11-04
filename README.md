@@ -88,12 +88,25 @@ All tools return structured JSON serialized in MCP text content blocks and inclu
 
 ---
 
-## Setup Wizard (Recommended)
+## Quick Start (Zero-Clone)
 
-To configure `.env`, generate secure secrets, test connections, and get the exact values to paste into Google Gemini interactively, run the interactive setup wizard:
+Deploy in seconds on your VPS without cloning the repository by downloading `docker-compose.yml` and the interactive setup wizard:
 
 ```bash
-./scripts/setup-wizard.sh
+# 1. Create a directory and switch into it
+mkdir -p actual-mcp && cd actual-mcp
+
+# 2. Download docker-compose.yml and the setup wizard
+curl -fsSL https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/scripts/setup-wizard.sh -o setup-wizard.sh
+chmod +x setup-wizard.sh
+
+# 3. Run the interactive setup wizard
+./setup-wizard.sh
+
+# 4. Pull and run the prebuilt Docker image
+docker compose pull
+docker compose up -d
 ```
 
 The wizard guides you through:

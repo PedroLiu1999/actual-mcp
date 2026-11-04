@@ -321,7 +321,8 @@ say "  Point hostname: ${PUBLIC_URL#https://}"
 say "  To service:     http://localhost:${PORT:-3000}"
 printf '\n'
 step "To start or restart the container on your VPS:"
-say "  docker compose up -d --build"
+say "  docker compose pull && docker compose up -d"
+say "  (or: docker compose up -d --build if building from source)"
 printf '\n'
 pause "Press Enter after you have started the container and Cloudflare Tunnel"
 

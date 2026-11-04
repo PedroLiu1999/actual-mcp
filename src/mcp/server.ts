@@ -12,6 +12,16 @@ const isoDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected date in YYYY-MM-DD format');
 
+const budgetMonthSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}$/, 'Expected month in YYYY-MM format');
+
+function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => value !== undefined),
+  ) as T;
+}
+
 export function createMcpServer(budgetGateway: BudgetGateway): McpServer {
   const server = new McpServer(
     {
@@ -94,9 +104,7 @@ export function createMcpServer(budgetGateway: BudgetGateway): McpServer {
       },
     },
     async (args) => {
-      const filter = Object.fromEntries(
-        Object.entries(args).filter(([, value]) => value !== undefined),
-      );
+      const filter = stripUndefined(args);
       const transactions =
         (await budgetGateway.getTransactions?.(
           Object.keys(filter).length > 0 ? filter : undefined,
@@ -343,10 +351,9 @@ export function createMcpServer(budgetGateway: BudgetGateway): McpServer {
       description:
         'Get the monthly envelope summary for a given YYYY-MM Budget Month (toBudget, totalIncome, totalBudgeted, totalSpent, totalBalance, and per-category budgeted, spent, balance, carryover in Decimal Amounts).',
       inputSchema: {
-        month: z
-          .string()
-          .regex(/^\d{4}-\d{2}$/, 'Expected month in YYYY-MM format')
-          .describe('Target Budget Month in YYYY-MM format (e.g. 2026-11).'),
+        month: budgetMonthSchema.describe(
+          'Target Budget Month in YYYY-MM format (e.g. 2026-11).',
+        ),
         forceSync: z
           .boolean()
           .optional()
@@ -377,10 +384,7 @@ export function createMcpServer(budgetGateway: BudgetGateway): McpServer {
   );
 
   const createTransactionItemSchema = z.object({
-    date: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected date in YYYY-MM-DD format')
-      .describe('Transaction date in YYYY-MM-DD format.'),
+    date: isoDateSchema.describe('Transaction date in YYYY-MM-DD format.'),
     amount: z
       .number()
       .finite()
@@ -442,11 +446,7 @@ export function createMcpServer(budgetGateway: BudgetGateway): McpServer {
           'createTransactions is not supported by the configured BudgetGateway',
         );
       }
-      const normalizedTransactions = transactions.map((item) =>
-        Object.fromEntries(
-          Object.entries(item).filter(([, value]) => value !== undefined),
-        ),
-      ) as typeof transactions;
+      const normalizedTransactions = transactions.map((item) => stripUndefined(item));
       const result = await budgetGateway.createTransactions({
         accountId,
         transactions: normalizedTransactions,
@@ -471,9 +471,7 @@ export function createMcpServer(budgetGateway: BudgetGateway): McpServer {
         'Update an existing transaction by ID (date, amount in Decimal Amount, payeeId, categoryId, notes, cleared) and return both { previous, updated } records in Decimal Amounts for verification or immediate reversal.',
       inputSchema: {
         id: z.string().min(1).describe('Target transaction UUID to update.'),
-        date: z
-          .string()
-          .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected date in YYYY-MM-DD format')
+        date: isoDateSchema
           .optional()
           .describe('New transaction date in YYYY-MM-DD format.'),
         amount: z
@@ -514,9 +512,7 @@ export function createMcpServer(budgetGateway: BudgetGateway): McpServer {
           'updateTransaction is not supported by the configured BudgetGateway',
         );
       }
-      const normalizedInput = Object.fromEntries(
-        Object.entries(args).filter(([, value]) => value !== undefined),
-      ) as { id: string } & Record<string, unknown>;
+      const normalizedInput = stripUndefined(args);
       const result = await budgetGateway.updateTransaction(normalizedInput);
       return {
         content: [
@@ -568,10 +564,9 @@ export function createMcpServer(budgetGateway: BudgetGateway): McpServer {
       description:
         'Update a category envelope in a given YYYY-MM Budget Month by setting budgeted (Decimal Amount) and/or carryover (boolean), and return { previous, updated } category states in Decimal Amounts.',
       inputSchema: {
-        month: z
-          .string()
-          .regex(/^\d{4}-\d{2}$/, 'Expected month in YYYY-MM format')
-          .describe('Target Budget Month in YYYY-MM format (e.g. 2026-11).'),
+        month: budgetMonthSchema.describe(
+          'Target Budget Month in YYYY-MM format (e.g. 2026-11).',
+        ),
         categoryId: z
           .string()
           .min(1)

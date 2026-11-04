@@ -431,6 +431,33 @@ export function createActualBudgetGateway(
     return undefined;
   }
 
+  function normalizeEnvelopeAmounts(record: Record<string, unknown>): {
+    budgeted: number;
+    spent: number;
+    balance: number;
+    received?: number;
+  } {
+    const budgetedMinor = typeof record.budgeted === 'number' ? record.budgeted : 0;
+    const receivedMinor =
+      typeof record.received === 'number' ? record.received : undefined;
+    const spentMinor =
+      typeof record.spent === 'number'
+        ? record.spent
+        : typeof receivedMinor === 'number'
+          ? receivedMinor
+          : 0;
+    const balanceMinor = typeof record.balance === 'number' ? record.balance : 0;
+
+    return {
+      budgeted: minorToDecimalAmount(budgetedMinor),
+      spent: minorToDecimalAmount(spentMinor),
+      balance: minorToDecimalAmount(balanceMinor),
+      ...(receivedMinor !== undefined
+        ? { received: minorToDecimalAmount(receivedMinor) }
+        : {}),
+    };
+  }
+
   async function fetchBudgetMonthSummary(
     apiAdapter: ActualApiAdapter,
     month: string,
@@ -445,56 +472,22 @@ export function createActualBudgetGateway(
       const groupId = String(group.id ?? '');
       const groupIsIncome = Boolean(group.is_income);
       const rawCategories = Array.isArray(group.categories) ? group.categories : [];
-      const categories: BudgetMonthCategorySummary[] = rawCategories.map((cat) => {
-        const catBudgeted = typeof cat.budgeted === 'number' ? cat.budgeted : 0;
-        const catReceived =
-          typeof cat.received === 'number' ? cat.received : undefined;
-        const catSpent =
-          typeof cat.spent === 'number'
-            ? cat.spent
-            : typeof catReceived === 'number'
-              ? catReceived
-              : 0;
-        const catBalance = typeof cat.balance === 'number' ? cat.balance : 0;
-
-        return {
-          id: String(cat.id ?? ''),
-          name: String(cat.name ?? ''),
-          group_id: String(cat.group_id ?? groupId),
-          is_income: Boolean(cat.is_income ?? groupIsIncome),
-          hidden: Boolean(cat.hidden),
-          budgeted: minorToDecimalAmount(catBudgeted),
-          spent: minorToDecimalAmount(catSpent),
-          balance: minorToDecimalAmount(catBalance),
-          carryover: Boolean(cat.carryover),
-          ...(catReceived !== undefined
-            ? { received: minorToDecimalAmount(catReceived) }
-            : {}),
-        };
-      });
-
-      const groupBudgeted = typeof group.budgeted === 'number' ? group.budgeted : 0;
-      const groupReceived =
-        typeof group.received === 'number' ? group.received : undefined;
-      const groupSpent =
-        typeof group.spent === 'number'
-          ? group.spent
-          : typeof groupReceived === 'number'
-            ? groupReceived
-            : 0;
-      const groupBalance = typeof group.balance === 'number' ? group.balance : 0;
+      const categories: BudgetMonthCategorySummary[] = rawCategories.map((cat) => ({
+        id: String(cat.id ?? ''),
+        name: String(cat.name ?? ''),
+        group_id: String(cat.group_id ?? groupId),
+        is_income: Boolean(cat.is_income ?? groupIsIncome),
+        hidden: Boolean(cat.hidden),
+        ...normalizeEnvelopeAmounts(cat),
+        carryover: Boolean(cat.carryover),
+      }));
 
       return {
         id: groupId,
         name: String(group.name ?? ''),
         is_income: groupIsIncome,
         hidden: Boolean(group.hidden),
-        budgeted: minorToDecimalAmount(groupBudgeted),
-        spent: minorToDecimalAmount(groupSpent),
-        balance: minorToDecimalAmount(groupBalance),
-        ...(groupReceived !== undefined
-          ? { received: minorToDecimalAmount(groupReceived) }
-          : {}),
+        ...normalizeEnvelopeAmounts(group),
         categories,
       };
     });

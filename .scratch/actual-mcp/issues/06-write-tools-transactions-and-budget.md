@@ -4,7 +4,7 @@
 
 **Blocked by:** 04: Core Read Tools — Transactions, Categories, Payees & Budget Months
 
-**Status:** done
+**Status:** resolved
 
 - [x] `create_transactions` accepts `accountId`, `transactions` (1 to 50 items with `date`, `amount` in Decimal Amount, `payeeName` or `payeeId`, `categoryId`, `notes`, `cleared`, `importedId`), and `runRules` (default `true`). Rejects batches larger than 50 transactions via schema validation.
 - [x] When `runRules: true` (default), `create_transactions` uses `@actual-app/api`'s `importTransactions` so payee matching and Actual categorization rules run automatically; when `runRules: false`, it uses `addTransactions`.

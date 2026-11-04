@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Walking Skeleton — Express App, Config, Healthcheck, Stateless MCP & list_accounts, 03: ActualBudgetGateway — Target Budget Cache, FIFO Mutex, Coalesced Sync & Shutdown
 
-**Status:** done
+**Status:** resolved
 
 - [x] `get_transactions` supports filtering by `accountId`, `startDate` (`YYYY-MM-DD`), `endDate` (`YYYY-MM-DD`), `categoryId`, `payeeId`, case-insensitive `searchText` (matching payee name or notes), `limit` (default 100, max 500), and `forceSync`, and returns transactions with Decimal Amounts and resolved `accountName`, `categoryName`, and `payeeName` alongside their IDs.
 - [x] `list_categories` returns category groups and their categories (`id`, `name`, `group_id`, `is_income`, `hidden`).

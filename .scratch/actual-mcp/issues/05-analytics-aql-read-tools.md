@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Walking Skeleton — Express App, Config, Healthcheck, Stateless MCP & list_accounts, 03: ActualBudgetGateway — Target Budget Cache, FIFO Mutex, Coalesced Sync & Shutdown
 
-**Status:** done
+**Status:** resolved
 
 - [x] `get_spending_summary` aggregates transactions over a `startDate`..`endDate` window grouped by `'category' | 'payee' | 'month'`, using `splits: 'inline'` so split parent and child transactions are never double-counted.
 - [x] `get_spending_summary` excludes internal account transfers (`payee.transfer_acct = null`) and off-budget accounts (`account.offbudget = false`) by default (with optional flags to include them) and returns totals in Decimal Amounts.

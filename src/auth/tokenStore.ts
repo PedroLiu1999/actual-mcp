@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-export interface StoredAccessToken {
+export interface StoredToken {
   token: string;
   clientId: string;
   scopes: string[];
@@ -10,13 +10,8 @@ export interface StoredAccessToken {
   resource?: string;
 }
 
-export interface StoredRefreshToken {
-  token: string;
-  clientId: string;
-  scopes: string[];
-  expiresAt: number;
-  resource?: string;
-}
+export type StoredAccessToken = StoredToken;
+export type StoredRefreshToken = StoredToken;
 
 interface TokenStoreData {
   accessTokens: StoredAccessToken[];
@@ -25,6 +20,61 @@ interface TokenStoreData {
 
 export const ACCESS_TOKEN_TTL_SECONDS = 3600;
 export const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
+
+function hydrateTokens(
+  items: unknown,
+  target: Map<string, StoredToken>,
+  nowSeconds: number,
+): void {
+  if (!Array.isArray(items)) {
+    return;
+  }
+
+  for (const item of items) {
+    if (
+      item &&
+      typeof item === 'object' &&
+      typeof item.token === 'string' &&
+      typeof item.clientId === 'string' &&
+      typeof item.expiresAt === 'number' &&
+      item.expiresAt > nowSeconds
+    ) {
+      target.set(item.token, {
+        token: item.token,
+        clientId: item.clientId,
+        scopes: Array.isArray(item.scopes) ? item.scopes : ['mcp:tools'],
+        expiresAt: item.expiresAt,
+        resource: typeof item.resource === 'string' ? item.resource : undefined,
+      });
+    }
+  }
+}
+
+function evictExpiredTokens(
+  store: Map<string, StoredToken>,
+  nowSeconds: number,
+): void {
+  for (const [key, val] of store.entries()) {
+    if (val.expiresAt <= nowSeconds) {
+      store.delete(key);
+    }
+  }
+}
+
+function getValidToken(
+  store: Map<string, StoredToken>,
+  token: string,
+): StoredToken | undefined {
+  const record = store.get(token);
+  if (!record) {
+    return undefined;
+  }
+  if (record.expiresAt <= Math.floor(Date.now() / 1000)) {
+    store.delete(token);
+    return undefined;
+  }
+  return record;
+}
 
 export class FileTokenStore {
   private readonly filePath: string;
@@ -48,45 +98,8 @@ export class FileTokenStore {
       const parsed = JSON.parse(raw) as Partial<TokenStoreData>;
       const nowSeconds = Math.floor(Date.now() / 1000);
 
-      if (Array.isArray(parsed.accessTokens)) {
-        for (const item of parsed.accessTokens) {
-          if (
-            item &&
-            typeof item.token === 'string' &&
-            typeof item.clientId === 'string' &&
-            typeof item.expiresAt === 'number' &&
-            item.expiresAt > nowSeconds
-          ) {
-            this.accessTokens.set(item.token, {
-              token: item.token,
-              clientId: item.clientId,
-              scopes: Array.isArray(item.scopes) ? item.scopes : ['mcp:tools'],
-              expiresAt: item.expiresAt,
-              resource: typeof item.resource === 'string' ? item.resource : undefined,
-            });
-          }
-        }
-      }
-
-      if (Array.isArray(parsed.refreshTokens)) {
-        for (const item of parsed.refreshTokens) {
-          if (
-            item &&
-            typeof item.token === 'string' &&
-            typeof item.clientId === 'string' &&
-            typeof item.expiresAt === 'number' &&
-            item.expiresAt > nowSeconds
-          ) {
-            this.refreshTokens.set(item.token, {
-              token: item.token,
-              clientId: item.clientId,
-              scopes: Array.isArray(item.scopes) ? item.scopes : ['mcp:tools'],
-              expiresAt: item.expiresAt,
-              resource: typeof item.resource === 'string' ? item.resource : undefined,
-            });
-          }
-        }
-      }
+      hydrateTokens(parsed.accessTokens, this.accessTokens, nowSeconds);
+      hydrateTokens(parsed.refreshTokens, this.refreshTokens, nowSeconds);
     } catch {
       // Ignore corrupt or empty state file and start fresh
     }
@@ -94,16 +107,8 @@ export class FileTokenStore {
 
   private persistToDisk(): void {
     const nowSeconds = Math.floor(Date.now() / 1000);
-    for (const [key, val] of this.accessTokens.entries()) {
-      if (val.expiresAt <= nowSeconds) {
-        this.accessTokens.delete(key);
-      }
-    }
-    for (const [key, val] of this.refreshTokens.entries()) {
-      if (val.expiresAt <= nowSeconds) {
-        this.refreshTokens.delete(key);
-      }
-    }
+    evictExpiredTokens(this.accessTokens, nowSeconds);
+    evictExpiredTokens(this.refreshTokens, nowSeconds);
 
     fs.mkdirSync(this.dataDir, { recursive: true });
     const payload: TokenStoreData = {
@@ -125,27 +130,11 @@ export class FileTokenStore {
   }
 
   getAccessToken(token: string): StoredAccessToken | undefined {
-    const record = this.accessTokens.get(token);
-    if (!record) {
-      return undefined;
-    }
-    if (record.expiresAt <= Math.floor(Date.now() / 1000)) {
-      this.accessTokens.delete(token);
-      return undefined;
-    }
-    return record;
+    return getValidToken(this.accessTokens, token);
   }
 
   getRefreshToken(token: string): StoredRefreshToken | undefined {
-    const record = this.refreshTokens.get(token);
-    if (!record) {
-      return undefined;
-    }
-    if (record.expiresAt <= Math.floor(Date.now() / 1000)) {
-      this.refreshTokens.delete(token);
-      return undefined;
-    }
-    return record;
+    return getValidToken(this.refreshTokens, token);
   }
 
   revokeToken(clientId: string, token: string): void {

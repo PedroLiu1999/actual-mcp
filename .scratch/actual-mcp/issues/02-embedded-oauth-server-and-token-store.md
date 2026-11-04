@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Walking Skeleton — Express App, Config, Healthcheck, Stateless MCP & list_accounts
 
-**Status:** done
+**Status:** resolved
 
 - [x] Unauthenticated requests to `/mcp` return HTTP `401 Unauthorized` with a `WWW-Authenticate: Bearer resource_metadata="..."` header pointing to the Protected Resource Metadata URL.
 - [x] `GET /.well-known/oauth-protected-resource/mcp` and the root alias `GET /.well-known/oauth-protected-resource` return RFC 9728 metadata referencing the server's `PUBLIC_URL` as the authorization server.

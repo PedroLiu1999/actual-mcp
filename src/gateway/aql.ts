@@ -1,6 +1,6 @@
 import * as actualApi from '@actual-app/api';
 import { z } from 'zod';
-import { minorToDecimalAmount } from '../currency.js';
+import { decimalToMinorAmount, minorToDecimalAmount } from '../currency.js';
 
 export const AQL_TABLES = [
   'transactions',
@@ -152,6 +152,21 @@ const UNALIASED_MONETARY_KEY_RE = /^\$(sum|avg|min|max|abs|neg)\(\$?_?amount\)$/
 
 function normalizeFieldRef(ref: string): string {
   return ref.startsWith('$') ? ref.slice(1) : ref;
+}
+
+export function isMonetaryField(table: AqlTable, field: string): boolean {
+  const normalized = normalizeFieldRef(field);
+  return ALLOWED_AQL_FIELDS[table].has(normalized) && MONETARY_FIELDS.has(normalized);
+}
+
+function convertMonetaryOperand(operand: unknown): unknown {
+  if (typeof operand === 'number') {
+    return decimalToMinorAmount(operand);
+  }
+  if (Array.isArray(operand)) {
+    return operand.map((item) => (typeof item === 'number' ? decimalToMinorAmount(item) : item));
+  }
+  return operand;
 }
 
 function validateFilterObject(
@@ -441,7 +456,10 @@ export function convertAqlRowAmounts(
   return converted;
 }
 
-function normalizeFilterExpression(filter: Record<string, unknown>): Record<string, unknown> {
+function normalizeFilterExpression(
+  filter: Record<string, unknown>,
+  table: AqlTable,
+): Record<string, unknown> {
   const andClauses: Array<Record<string, unknown>> = [];
   const normalized: Record<string, unknown> = {};
 
@@ -449,14 +467,19 @@ function normalizeFilterExpression(filter: Record<string, unknown>): Record<stri
     if ((key === '$and' || key === '$or') && Array.isArray(value)) {
       normalized[key] = value.map((item) =>
         typeof item === 'object' && item !== null
-          ? normalizeFilterExpression(item as Record<string, unknown>)
+          ? normalizeFilterExpression(item as Record<string, unknown>, table)
           : item,
       );
       continue;
     }
 
+    const monetary = isMonetaryField(table, key);
+
     if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      const opEntries = Object.entries(value as Record<string, unknown>);
+      const opEntries = Object.entries(value as Record<string, unknown>).map(
+        ([op, opVal]) =>
+          [op, monetary && op !== '$transform' ? convertMonetaryOperand(opVal) : opVal] as const,
+      );
       const transformEntry = opEntries.find(([op]) => op === '$transform');
       const comparisonEntries = opEntries.filter(([op]) => op !== '$transform');
 
@@ -471,9 +494,12 @@ function normalizeFilterExpression(filter: Record<string, unknown>): Record<stri
         }
         continue;
       }
+
+      normalized[key] = Object.fromEntries(opEntries);
+      continue;
     }
 
-    normalized[key] = value;
+    normalized[key] = monetary ? convertMonetaryOperand(value) : value;
   }
 
   if (andClauses.length > 0) {
@@ -493,7 +519,7 @@ export function compileStructuredAqlQuery(
   let query = qBuilder(parsed.table);
 
   if (parsed.filter && Object.keys(parsed.filter).length > 0) {
-    query = query.filter(normalizeFilterExpression(parsed.filter));
+    query = query.filter(normalizeFilterExpression(parsed.filter, parsed.table));
   }
 
   if (parsed.groupBy !== undefined) {

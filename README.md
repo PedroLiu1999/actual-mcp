@@ -155,9 +155,9 @@ Expected response:
 {
   "status": "ok",
   "targetBudget": {
-    "initialized": true,
-    "lastSyncedAt": "2026-11-04T18:00:00.000Z",
-    "initError": null
+    "ready": true,
+    "syncId": "11111111-2222-3333-4444-555555555555",
+    "lastSyncedAt": "2026-11-04T18:00:00.000Z"
   }
 }
 ```

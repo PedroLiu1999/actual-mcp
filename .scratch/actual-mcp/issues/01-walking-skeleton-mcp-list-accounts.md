@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** done
+**Status:** resolved
 
 - [x] Startup configuration validates required environment variables (`PUBLIC_URL`, `PORT`, `DATA_DIR`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ADMIN_PASSWORD`, `ACTUAL_SERVER_URL`, `ACTUAL_PASSWORD`, `ACTUAL_SYNC_ID`, and optional `ACTUAL_ENCRYPTION_PASSWORD`, `SYNC_TTL_SECONDS`) and fails fast with a descriptive error when invalid.
 - [x] Express application enables reverse proxy trust (`trust proxy: 1`) and validates the incoming `Host` header against the configured `PUBLIC_URL` hostname plus `localhost` and `127.0.0.1`.

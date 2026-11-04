@@ -8,6 +8,10 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig, type AppConfig } from '../src/config.js';
+import {
+  compileStructuredAqlQuery,
+  structuredAqlQueryInputSchema,
+} from '../src/gateway/aql.js';
 import { createActualBudgetGateway, type ActualBudgetGateway } from '../src/gateway/actualBudgetGateway.js';
 
 async function issueBearerToken(app: Express, config: AppConfig): Promise<string> {
@@ -282,6 +286,94 @@ describe('BudgetGateway seam — get_spending_summary & run_aql_query against SQ
     });
     expect(accountsResult.rows).toEqual([
       expect.objectContaining({ name: 'Checking', offbudget: false }),
+    ]);
+  });
+
+  it('converts Decimal Amount filter inputs on monetary fields (direct equality, comparison operators, $oneof, and nested $and/$or) to Minor Unit Amounts', async () => {
+    const ltResult = await gateway.runAqlQuery({
+      table: 'transactions',
+      filter: {
+        date: { $gte: '2026-03-01', $lte: '2026-03-31' },
+        'account.offbudget': false,
+        'payee.transfer_acct': null,
+        amount: { $lt: -50 },
+      },
+      select: ['date', 'amount', 'payee.name'],
+      orderBy: { amount: 'asc' },
+    });
+
+    expect(
+      ltResult.rows.map((r) => ({
+        date: r.date,
+        amount: r.amount,
+        payee: r['payee.name'],
+      })),
+    ).toEqual([
+      { date: '2026-03-10', amount: -60, payee: 'Target' },
+      { date: '2026-03-05', amount: -50.25, payee: 'Trader Joes' },
+    ]);
+
+    const eqResult = await gateway.runAqlQuery({
+      table: 'transactions',
+      filter: {
+        amount: -50.25,
+      },
+      select: ['date', 'amount', 'payee.name'],
+    });
+
+    expect(
+      eqResult.rows.map((r) => ({
+        date: r.date,
+        amount: r.amount,
+        payee: r['payee.name'],
+      })),
+    ).toEqual([
+      { date: '2026-03-05', amount: -50.25, payee: 'Trader Joes' },
+    ]);
+
+    const compiledOneOf = compileStructuredAqlQuery(
+      structuredAqlQueryInputSchema.parse({
+        table: 'transactions',
+        filter: {
+          amount: { $oneof: [-12.34, -25.0] },
+          $and: [{ amount: -12.34 }, { $or: [{ amount: { $lt: -50 } }] }],
+        },
+      }),
+    ).serialize();
+
+    expect(compiledOneOf.filterExpressions).toEqual([
+      {
+        amount: { $oneof: [-1234, -2500] },
+        $and: [{ amount: -1234 }, { $or: [{ amount: { $lt: -5000 } }] }],
+      },
+    ]);
+
+    const nestedLogicalResult = await gateway.runAqlQuery({
+      table: 'transactions',
+      filter: {
+        $or: [
+          { amount: -50.25 },
+          {
+            $and: [
+              { date: '2026-03-10' },
+              { amount: { $gt: -50, $lte: -40 } },
+            ],
+          },
+        ],
+      },
+      select: ['date', 'amount', 'payee.name'],
+      orderBy: { amount: 'asc' },
+    });
+
+    expect(
+      nestedLogicalResult.rows.map((r) => ({
+        date: r.date,
+        amount: r.amount,
+        payee: r['payee.name'],
+      })),
+    ).toEqual([
+      { date: '2026-03-05', amount: -50.25, payee: 'Trader Joes' },
+      { date: '2026-03-10', amount: -40, payee: 'Target' },
     ]);
   });
 

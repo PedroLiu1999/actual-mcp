@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: Walking Skeleton — Express App, Config, Healthcheck, Stateless MCP & list_accounts
 
-**Status:** done
+**Status:** resolved
 
 - [x] On initialization, ensures the local Budget Cache directory exists on disk, initializes `@actual-app/api` with `serverURL` and `password`, and opens the Target Budget via `downloadBudget(syncId, { password: encryptionPassword })`.
 - [x] All operations on `ActualBudgetGateway` (reads, writes, explicit syncs, and shutdown) execute sequentially through a single process-wide non-reentrant FIFO mutex so concurrent callers never overlap.

@@ -376,5 +376,252 @@ export function createMcpServer(budgetGateway: BudgetGateway): McpServer {
     },
   );
 
+  const createTransactionItemSchema = z.object({
+    date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected date in YYYY-MM-DD format')
+      .describe('Transaction date in YYYY-MM-DD format.'),
+    amount: z
+      .number()
+      .finite()
+      .describe(
+        'Transaction amount as a Decimal Amount (negative for Outflow/expense e.g. -12.34, positive for Inflow/income e.g. 100.00).',
+      ),
+    payeeName: z
+      .string()
+      .optional()
+      .describe('Payee name to match or create when importing transactions.'),
+    payeeId: z
+      .string()
+      .optional()
+      .describe('Existing payee UUID to assign to the transaction.'),
+    categoryId: z
+      .string()
+      .optional()
+      .describe('Category UUID to assign to the transaction.'),
+    notes: z.string().optional().describe('Optional transaction notes.'),
+    cleared: z
+      .boolean()
+      .optional()
+      .describe('Whether the transaction is cleared.'),
+    importedId: z
+      .string()
+      .optional()
+      .describe('Optional unique imported_id for deduplication.'),
+  });
+
+  server.registerTool(
+    'create_transactions',
+    {
+      title: 'Create Transactions',
+      description:
+        'Create 1 to 50 transactions in an account using Decimal Amounts. Uses importTransactions by default (runRules: true) so payee matching and Actual categorization rules run automatically, or addTransactions when runRules is false.',
+      inputSchema: {
+        accountId: z.string().min(1).describe('Target account UUID.'),
+        transactions: z
+          .array(createTransactionItemSchema)
+          .min(1, 'At least 1 transaction is required')
+          .max(50, 'At most 50 transactions can be created per call')
+          .describe('Batch of 1 to 50 transactions to create.'),
+        runRules: z
+          .boolean()
+          .optional()
+          .default(true)
+          .describe(
+            'When true (default), uses importTransactions to match/create payees and run Actual rules; when false, uses raw addTransactions.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async ({ accountId, transactions, runRules }) => {
+      if (!budgetGateway.createTransactions) {
+        throw new Error(
+          'createTransactions is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedTransactions = transactions.map((item) =>
+        Object.fromEntries(
+          Object.entries(item).filter(([, value]) => value !== undefined),
+        ),
+      ) as typeof transactions;
+      const result = await budgetGateway.createTransactions({
+        accountId,
+        transactions: normalizedTransactions,
+        runRules: runRules ?? true,
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'update_transaction',
+    {
+      title: 'Update Transaction',
+      description:
+        'Update an existing transaction by ID (date, amount in Decimal Amount, payeeId, categoryId, notes, cleared) and return both { previous, updated } records in Decimal Amounts for verification or immediate reversal.',
+      inputSchema: {
+        id: z.string().min(1).describe('Target transaction UUID to update.'),
+        date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected date in YYYY-MM-DD format')
+          .optional()
+          .describe('New transaction date in YYYY-MM-DD format.'),
+        amount: z
+          .number()
+          .finite()
+          .optional()
+          .describe(
+            'New transaction amount as a Decimal Amount (negative for Outflow, positive for Inflow).',
+          ),
+        payeeId: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('New payee UUID (or null to clear).'),
+        categoryId: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('New category UUID (or null to clear).'),
+        notes: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('New transaction notes (or null to clear).'),
+        cleared: z
+          .boolean()
+          .optional()
+          .describe('New cleared status.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.updateTransaction) {
+        throw new Error(
+          'updateTransaction is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = Object.fromEntries(
+        Object.entries(args).filter(([, value]) => value !== undefined),
+      ) as { id: string } & Record<string, unknown>;
+      const result = await budgetGateway.updateTransaction(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'delete_transaction',
+    {
+      title: 'Delete Transaction',
+      description:
+        'Delete an existing transaction by ID and return { deleted } containing the full pre-deletion transaction record in Decimal Amounts so it can be recreated if needed.',
+      inputSchema: {
+        id: z.string().min(1).describe('Target transaction UUID to delete.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async ({ id }) => {
+      if (!budgetGateway.deleteTransaction) {
+        throw new Error(
+          'deleteTransaction is not supported by the configured BudgetGateway',
+        );
+      }
+      const result = await budgetGateway.deleteTransaction(id);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'set_budget_amount',
+    {
+      title: 'Set Budget Amount',
+      description:
+        'Update a category envelope in a given YYYY-MM Budget Month by setting budgeted (Decimal Amount) and/or carryover (boolean), and return { previous, updated } category states in Decimal Amounts.',
+      inputSchema: {
+        month: z
+          .string()
+          .regex(/^\d{4}-\d{2}$/, 'Expected month in YYYY-MM format')
+          .describe('Target Budget Month in YYYY-MM format (e.g. 2026-11).'),
+        categoryId: z
+          .string()
+          .min(1)
+          .describe('Target category UUID.'),
+        budgeted: z
+          .number()
+          .finite()
+          .optional()
+          .describe(
+            'New budgeted Decimal Amount for this category in the specified month.',
+          ),
+        carryover: z
+          .boolean()
+          .optional()
+          .describe(
+            'Whether to roll over overspending for this expense category starting in the specified month.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async ({ month, categoryId, budgeted, carryover }) => {
+      if (budgeted === undefined && carryover === undefined) {
+        throw new Error(
+          'set_budget_amount requires at least one of budgeted or carryover',
+        );
+      }
+      if (!budgetGateway.setBudgetAmount) {
+        throw new Error(
+          'setBudgetAmount is not supported by the configured BudgetGateway',
+        );
+      }
+      const result = await budgetGateway.setBudgetAmount({
+        month,
+        categoryId,
+        ...(budgeted !== undefined ? { budgeted } : {}),
+        ...(carryover !== undefined ? { carryover } : {}),
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
   return server;
 }

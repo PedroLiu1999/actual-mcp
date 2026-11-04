@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import * as actualApi from '@actual-app/api';
-import { minorToDecimalAmount } from '../currency.js';
+import { decimalToMinorAmount, minorToDecimalAmount } from '../currency.js';
 import {
   collectMonetaryKeys,
   compileStructuredAqlQuery,
@@ -18,12 +18,19 @@ import type {
   BudgetReadiness,
   CategoryGroupSummary,
   CategorySummary,
+  CreateTransactionsInput,
+  CreateTransactionsResult,
+  DeleteTransactionResult,
   GetSpendingSummaryInput,
   GetTransactionsFilter,
   PayeeSummary,
+  SetBudgetAmountInput,
+  SetBudgetAmountResult,
   SpendingSummary,
   SpendingSummaryGroup,
   TransactionRecord,
+  UpdateTransactionInput,
+  UpdateTransactionResult,
 } from './types.js';
 
 export interface ActualAccountRecord {
@@ -98,6 +105,24 @@ export interface ActualInitConfig {
   password: string;
 }
 
+export interface ActualImportTransactionInput {
+  account: string;
+  date: string;
+  amount: number;
+  payee?: string;
+  payee_name?: string;
+  category?: string;
+  notes?: string;
+  cleared?: boolean;
+  imported_id?: string;
+}
+
+export interface ActualImportTransactionsResult {
+  added?: string[];
+  updated?: string[];
+  errors?: unknown[];
+}
+
 export interface ActualApiAdapter {
   init?(config: ActualInitConfig): Promise<unknown>;
   downloadBudget?(syncId: string, opts?: { password?: string }): Promise<void>;
@@ -115,6 +140,22 @@ export interface ActualApiAdapter {
     startDate: string,
     endDate: string,
   ): Promise<ActualTransactionRecord[]>;
+  importTransactions?(
+    accountId: string,
+    transactions: ActualImportTransactionInput[],
+  ): Promise<ActualImportTransactionsResult>;
+  addTransactions?(
+    accountId: string,
+    transactions: ActualImportTransactionInput[],
+    opts?: { learnCategories?: boolean; runTransfers?: boolean },
+  ): Promise<unknown>;
+  updateTransaction?(
+    id: string,
+    fields: Record<string, unknown>,
+  ): Promise<unknown>;
+  deleteTransaction?(id: string): Promise<unknown>;
+  setBudgetAmount?(month: string, categoryId: string, value: number): Promise<void>;
+  setBudgetCarryover?(month: string, categoryId: string, flag: boolean): Promise<void>;
   q?: typeof actualApi.q;
   aqlQuery?(query: ReturnType<typeof actualApi.q>): Promise<unknown>;
 }
@@ -148,6 +189,10 @@ export interface ActualBudgetGateway extends BudgetGateway {
     month: string,
     options?: { forceSync?: boolean },
   ): Promise<BudgetMonthSummary>;
+  createTransactions(input: CreateTransactionsInput): Promise<CreateTransactionsResult>;
+  updateTransaction(input: UpdateTransactionInput): Promise<UpdateTransactionResult>;
+  deleteTransaction(id: string): Promise<DeleteTransactionResult>;
+  setBudgetAmount(input: SetBudgetAmountInput): Promise<SetBudgetAmountResult>;
   executeRead<T>(
     operation: (api: ActualApiAdapter) => Promise<T>,
     options?: { forceSync?: boolean },
@@ -308,6 +353,168 @@ export function createActualBudgetGateway(
   if (options.signalTarget) {
     options.signalTarget.once('SIGTERM', handleSignal);
     options.signalTarget.once('SIGINT', handleSignal);
+  }
+
+  async function fetchEnrichedTransactions(
+    apiAdapter: ActualApiAdapter,
+    accountId = '',
+    startDate = '',
+    endDate = '',
+  ): Promise<TransactionRecord[]> {
+    const rawTransactions =
+      (await apiAdapter.getTransactions?.(accountId, startDate, endDate)) ?? [];
+    const rawAccounts = (await apiAdapter.getAccounts?.()) ?? [];
+    const rawCategories = apiAdapter.getCategories
+      ? await apiAdapter.getCategories()
+      : ((await apiAdapter.getCategoryGroups?.()) ?? []).flatMap(
+          (g) => g.categories ?? [],
+        );
+    const rawPayees = (await apiAdapter.getPayees?.()) ?? [];
+
+    const accountNameById = new Map(rawAccounts.map((a) => [a.id, a.name]));
+    const categoryNameById = new Map(rawCategories.map((c) => [c.id, c.name]));
+    const payeeNameById = new Map(rawPayees.map((p) => [p.id, p.name]));
+
+    const enrichTransaction = (tx: ActualTransactionRecord): TransactionRecord => {
+      const txAccountId = tx.account;
+      const payeeId = tx.payee ?? null;
+      const categoryId = tx.category ?? null;
+      const subtransactions = Array.isArray(tx.subtransactions)
+        ? tx.subtransactions.map(enrichTransaction)
+        : undefined;
+
+      return {
+        id: tx.id,
+        account: txAccountId,
+        accountId: txAccountId,
+        accountName: accountNameById.get(txAccountId) ?? null,
+        date: tx.date,
+        amount: minorToDecimalAmount(tx.amount),
+        payee: payeeId,
+        payeeId,
+        payeeName: payeeId
+          ? (payeeNameById.get(payeeId) ?? tx.imported_payee ?? null)
+          : (tx.imported_payee ?? null),
+        category: categoryId,
+        categoryId,
+        categoryName: categoryId ? (categoryNameById.get(categoryId) ?? null) : null,
+        notes: tx.notes ?? null,
+        cleared: Boolean(tx.cleared),
+        ...(tx.reconciled !== undefined ? { reconciled: Boolean(tx.reconciled) } : {}),
+        ...(tx.imported_id !== undefined ? { imported_id: tx.imported_id } : {}),
+        ...(tx.transfer_id !== undefined ? { transfer_id: tx.transfer_id } : {}),
+        ...(tx.is_parent !== undefined ? { is_parent: Boolean(tx.is_parent) } : {}),
+        ...(tx.is_child !== undefined ? { is_child: Boolean(tx.is_child) } : {}),
+        ...(tx.parent_id !== undefined ? { parent_id: tx.parent_id } : {}),
+        ...(subtransactions !== undefined ? { subtransactions } : {}),
+      };
+    };
+
+    return rawTransactions.map(enrichTransaction);
+  }
+
+  function findTransactionById(
+    records: TransactionRecord[],
+    id: string,
+  ): TransactionRecord | undefined {
+    for (const record of records) {
+      if (record.id === id) {
+        return record;
+      }
+      if (record.subtransactions) {
+        const sub = findTransactionById(record.subtransactions, id);
+        if (sub) {
+          return sub;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  async function fetchBudgetMonthSummary(
+    apiAdapter: ActualApiAdapter,
+    month: string,
+  ): Promise<BudgetMonthSummary> {
+    if (!apiAdapter.getBudgetMonth) {
+      throw new Error('getBudgetMonth is not supported by the current API adapter');
+    }
+    const raw = await apiAdapter.getBudgetMonth(month);
+    const categoryGroups: BudgetMonthCategoryGroupSummary[] = (
+      raw.categoryGroups ?? []
+    ).map((group) => {
+      const groupId = String(group.id ?? '');
+      const groupIsIncome = Boolean(group.is_income);
+      const rawCategories = Array.isArray(group.categories) ? group.categories : [];
+      const categories: BudgetMonthCategorySummary[] = rawCategories.map((cat) => {
+        const catBudgeted = typeof cat.budgeted === 'number' ? cat.budgeted : 0;
+        const catReceived =
+          typeof cat.received === 'number' ? cat.received : undefined;
+        const catSpent =
+          typeof cat.spent === 'number'
+            ? cat.spent
+            : typeof catReceived === 'number'
+              ? catReceived
+              : 0;
+        const catBalance = typeof cat.balance === 'number' ? cat.balance : 0;
+
+        return {
+          id: String(cat.id ?? ''),
+          name: String(cat.name ?? ''),
+          group_id: String(cat.group_id ?? groupId),
+          is_income: Boolean(cat.is_income ?? groupIsIncome),
+          hidden: Boolean(cat.hidden),
+          budgeted: minorToDecimalAmount(catBudgeted),
+          spent: minorToDecimalAmount(catSpent),
+          balance: minorToDecimalAmount(catBalance),
+          carryover: Boolean(cat.carryover),
+          ...(catReceived !== undefined
+            ? { received: minorToDecimalAmount(catReceived) }
+            : {}),
+        };
+      });
+
+      const groupBudgeted = typeof group.budgeted === 'number' ? group.budgeted : 0;
+      const groupReceived =
+        typeof group.received === 'number' ? group.received : undefined;
+      const groupSpent =
+        typeof group.spent === 'number'
+          ? group.spent
+          : typeof groupReceived === 'number'
+            ? groupReceived
+            : 0;
+      const groupBalance = typeof group.balance === 'number' ? group.balance : 0;
+
+      return {
+        id: groupId,
+        name: String(group.name ?? ''),
+        is_income: groupIsIncome,
+        hidden: Boolean(group.hidden),
+        budgeted: minorToDecimalAmount(groupBudgeted),
+        spent: minorToDecimalAmount(groupSpent),
+        balance: minorToDecimalAmount(groupBalance),
+        ...(groupReceived !== undefined
+          ? { received: minorToDecimalAmount(groupReceived) }
+          : {}),
+        categories,
+      };
+    });
+
+    const categories = categoryGroups.flatMap((group) => group.categories);
+
+    return {
+      month: raw.month ?? month,
+      incomeAvailable: minorToDecimalAmount(raw.incomeAvailable ?? 0),
+      lastMonthOverspent: minorToDecimalAmount(raw.lastMonthOverspent ?? 0),
+      forNextMonth: minorToDecimalAmount(raw.forNextMonth ?? 0),
+      totalBudgeted: minorToDecimalAmount(raw.totalBudgeted ?? 0),
+      toBudget: minorToDecimalAmount(raw.toBudget ?? 0),
+      fromLastMonth: minorToDecimalAmount(raw.fromLastMonth ?? 0),
+      totalIncome: minorToDecimalAmount(raw.totalIncome ?? 0),
+      totalSpent: minorToDecimalAmount(raw.totalSpent ?? 0),
+      totalBalance: minorToDecimalAmount(raw.totalBalance ?? 0),
+      categoryGroups,
+      categories,
+    };
   }
 
   return {
@@ -484,61 +691,12 @@ export function createActualBudgetGateway(
     ): Promise<TransactionRecord[]> {
       return executeRead(
         async (apiAdapter) => {
-          const rawTransactions =
-            (await apiAdapter.getTransactions?.(
-              filter?.accountId ?? '',
-              filter?.startDate ?? '',
-              filter?.endDate ?? '',
-            )) ?? [];
-
-          const rawAccounts = (await apiAdapter.getAccounts?.()) ?? [];
-          const rawCategories = apiAdapter.getCategories
-            ? await apiAdapter.getCategories()
-            : ((await apiAdapter.getCategoryGroups?.()) ?? []).flatMap(
-                (g) => g.categories ?? [],
-              );
-          const rawPayees = (await apiAdapter.getPayees?.()) ?? [];
-
-          const accountNameById = new Map(rawAccounts.map((a) => [a.id, a.name]));
-          const categoryNameById = new Map(rawCategories.map((c) => [c.id, c.name]));
-          const payeeNameById = new Map(rawPayees.map((p) => [p.id, p.name]));
-
-          const enrichTransaction = (tx: ActualTransactionRecord): TransactionRecord => {
-            const accountId = tx.account;
-            const payeeId = tx.payee ?? null;
-            const categoryId = tx.category ?? null;
-            const subtransactions = Array.isArray(tx.subtransactions)
-              ? tx.subtransactions.map(enrichTransaction)
-              : undefined;
-
-            return {
-              id: tx.id,
-              account: accountId,
-              accountId,
-              accountName: accountNameById.get(accountId) ?? null,
-              date: tx.date,
-              amount: minorToDecimalAmount(tx.amount),
-              payee: payeeId,
-              payeeId,
-              payeeName: payeeId
-                ? (payeeNameById.get(payeeId) ?? tx.imported_payee ?? null)
-                : (tx.imported_payee ?? null),
-              category: categoryId,
-              categoryId,
-              categoryName: categoryId ? (categoryNameById.get(categoryId) ?? null) : null,
-              notes: tx.notes ?? null,
-              cleared: Boolean(tx.cleared),
-              ...(tx.reconciled !== undefined ? { reconciled: Boolean(tx.reconciled) } : {}),
-              ...(tx.imported_id !== undefined ? { imported_id: tx.imported_id } : {}),
-              ...(tx.transfer_id !== undefined ? { transfer_id: tx.transfer_id } : {}),
-              ...(tx.is_parent !== undefined ? { is_parent: Boolean(tx.is_parent) } : {}),
-              ...(tx.is_child !== undefined ? { is_child: Boolean(tx.is_child) } : {}),
-              ...(tx.parent_id !== undefined ? { parent_id: tx.parent_id } : {}),
-              ...(subtransactions !== undefined ? { subtransactions } : {}),
-            };
-          };
-
-          const enriched = rawTransactions.map(enrichTransaction);
+          const enriched = await fetchEnrichedTransactions(
+            apiAdapter,
+            filter?.accountId ?? '',
+            filter?.startDate ?? '',
+            filter?.endDate ?? '',
+          );
           const searchNeedle = filter?.searchText?.trim().toLowerCase() ?? '';
           const effectiveLimit = Math.min(Math.max(filter?.limit ?? 100, 1), 500);
 
@@ -642,87 +800,202 @@ export function createActualBudgetGateway(
       readOptions?: { forceSync?: boolean },
     ): Promise<BudgetMonthSummary> {
       return executeRead(async (apiAdapter) => {
-        if (!apiAdapter.getBudgetMonth) {
-          throw new Error('getBudgetMonth is not supported by the current API adapter');
-        }
-        const raw = await apiAdapter.getBudgetMonth(month);
-        const categoryGroups: BudgetMonthCategoryGroupSummary[] = (
-          raw.categoryGroups ?? []
-        ).map((group) => {
-          const groupId = String(group.id ?? '');
-          const groupIsIncome = Boolean(group.is_income);
-          const rawCategories = Array.isArray(group.categories) ? group.categories : [];
-          const categories: BudgetMonthCategorySummary[] = rawCategories.map((cat) => {
-            const catBudgeted = typeof cat.budgeted === 'number' ? cat.budgeted : 0;
-            const catReceived =
-              typeof cat.received === 'number' ? cat.received : undefined;
-            const catSpent =
-              typeof cat.spent === 'number'
-                ? cat.spent
-                : typeof catReceived === 'number'
-                  ? catReceived
-                  : 0;
-            const catBalance = typeof cat.balance === 'number' ? cat.balance : 0;
+        return fetchBudgetMonthSummary(apiAdapter, month);
+      }, readOptions);
+    },
+    async createTransactions(
+      input: CreateTransactionsInput,
+    ): Promise<CreateTransactionsResult> {
+      if (input.transactions.length < 1 || input.transactions.length > 50) {
+        throw new Error('createTransactions requires between 1 and 50 transactions');
+      }
 
-            return {
-              id: String(cat.id ?? ''),
-              name: String(cat.name ?? ''),
-              group_id: String(cat.group_id ?? groupId),
-              is_income: Boolean(cat.is_income ?? groupIsIncome),
-              hidden: Boolean(cat.hidden),
-              budgeted: minorToDecimalAmount(catBudgeted),
-              spent: minorToDecimalAmount(catSpent),
-              balance: minorToDecimalAmount(catBalance),
-              carryover: Boolean(cat.carryover),
-              ...(catReceived !== undefined
-                ? { received: minorToDecimalAmount(catReceived) }
-                : {}),
-            };
-          });
+      return executeWrite(async (apiAdapter) => {
+        const mappedTransactions: ActualImportTransactionInput[] =
+          input.transactions.map((tx) => ({
+            account: input.accountId,
+            date: tx.date,
+            amount: decimalToMinorAmount(tx.amount),
+            ...(tx.payeeId !== undefined ? { payee: tx.payeeId } : {}),
+            ...(tx.payeeName !== undefined ? { payee_name: tx.payeeName } : {}),
+            ...(tx.categoryId !== undefined ? { category: tx.categoryId } : {}),
+            ...(tx.notes !== undefined ? { notes: tx.notes } : {}),
+            ...(tx.cleared !== undefined ? { cleared: tx.cleared } : {}),
+            ...(tx.importedId !== undefined ? { imported_id: tx.importedId } : {}),
+          }));
 
-          const groupBudgeted = typeof group.budgeted === 'number' ? group.budgeted : 0;
-          const groupReceived =
-            typeof group.received === 'number' ? group.received : undefined;
-          const groupSpent =
-            typeof group.spent === 'number'
-              ? group.spent
-              : typeof groupReceived === 'number'
-                ? groupReceived
-                : 0;
-          const groupBalance = typeof group.balance === 'number' ? group.balance : 0;
-
+        const runRules = input.runRules ?? true;
+        if (runRules) {
+          if (!apiAdapter.importTransactions) {
+            throw new Error(
+              'importTransactions is not supported by the current API adapter',
+            );
+          }
+          const result = await apiAdapter.importTransactions(
+            input.accountId,
+            mappedTransactions,
+          );
           return {
-            id: groupId,
-            name: String(group.name ?? ''),
-            is_income: groupIsIncome,
-            hidden: Boolean(group.hidden),
-            budgeted: minorToDecimalAmount(groupBudgeted),
-            spent: minorToDecimalAmount(groupSpent),
-            balance: minorToDecimalAmount(groupBalance),
-            ...(groupReceived !== undefined
-              ? { received: minorToDecimalAmount(groupReceived) }
-              : {}),
-            categories,
+            mode: 'import',
+            added: result?.added ?? [],
+            updated: result?.updated ?? [],
+            errors: result?.errors ?? [],
           };
-        });
+        }
 
-        const categories = categoryGroups.flatMap((group) => group.categories);
+        if (!apiAdapter.addTransactions) {
+          throw new Error(
+            'addTransactions is not supported by the current API adapter',
+          );
+        }
+        await apiAdapter.addTransactions(input.accountId, mappedTransactions);
+        return {
+          mode: 'add',
+          added: [],
+          updated: [],
+          errors: [],
+        };
+      });
+    },
+    async updateTransaction(
+      input: UpdateTransactionInput,
+    ): Promise<UpdateTransactionResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.updateTransaction) {
+          throw new Error(
+            'updateTransaction is not supported by the current API adapter',
+          );
+        }
+
+        const beforeRecords = await fetchEnrichedTransactions(apiAdapter);
+        const previous = findTransactionById(beforeRecords, input.id);
+        if (!previous) {
+          throw new Error(`Transaction not found: ${input.id}`);
+        }
+
+        const fields: Record<string, unknown> = {};
+        if (input.date !== undefined) {
+          fields.date = input.date;
+        }
+        if (input.amount !== undefined) {
+          fields.amount = decimalToMinorAmount(input.amount);
+        }
+        if (input.payeeId !== undefined) {
+          fields.payee = input.payeeId;
+        }
+        if (input.categoryId !== undefined) {
+          fields.category = input.categoryId;
+        }
+        if (input.notes !== undefined) {
+          fields.notes = input.notes;
+        }
+        if (input.cleared !== undefined) {
+          fields.cleared = input.cleared;
+        }
+
+        await apiAdapter.updateTransaction(input.id, fields);
+
+        const afterRecords = await fetchEnrichedTransactions(apiAdapter);
+        const updated = findTransactionById(afterRecords, input.id) ?? {
+          ...previous,
+          ...(input.date !== undefined ? { date: input.date } : {}),
+          ...(input.amount !== undefined ? { amount: input.amount } : {}),
+          ...(input.payeeId !== undefined
+            ? { payee: input.payeeId, payeeId: input.payeeId }
+            : {}),
+          ...(input.categoryId !== undefined
+            ? { category: input.categoryId, categoryId: input.categoryId }
+            : {}),
+          ...(input.notes !== undefined ? { notes: input.notes } : {}),
+          ...(input.cleared !== undefined ? { cleared: input.cleared } : {}),
+        };
 
         return {
-          month: raw.month ?? month,
-          incomeAvailable: minorToDecimalAmount(raw.incomeAvailable ?? 0),
-          lastMonthOverspent: minorToDecimalAmount(raw.lastMonthOverspent ?? 0),
-          forNextMonth: minorToDecimalAmount(raw.forNextMonth ?? 0),
-          totalBudgeted: minorToDecimalAmount(raw.totalBudgeted ?? 0),
-          toBudget: minorToDecimalAmount(raw.toBudget ?? 0),
-          fromLastMonth: minorToDecimalAmount(raw.fromLastMonth ?? 0),
-          totalIncome: minorToDecimalAmount(raw.totalIncome ?? 0),
-          totalSpent: minorToDecimalAmount(raw.totalSpent ?? 0),
-          totalBalance: minorToDecimalAmount(raw.totalBalance ?? 0),
-          categoryGroups,
-          categories,
+          previous,
+          updated,
         };
-      }, readOptions);
+      });
+    },
+    async deleteTransaction(id: string): Promise<DeleteTransactionResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.deleteTransaction) {
+          throw new Error(
+            'deleteTransaction is not supported by the current API adapter',
+          );
+        }
+
+        const beforeRecords = await fetchEnrichedTransactions(apiAdapter);
+        const deleted = findTransactionById(beforeRecords, id);
+        if (!deleted) {
+          throw new Error(`Transaction not found: ${id}`);
+        }
+
+        await apiAdapter.deleteTransaction(id);
+        return { deleted };
+      });
+    },
+    async setBudgetAmount(
+      input: SetBudgetAmountInput,
+    ): Promise<SetBudgetAmountResult> {
+      if (input.budgeted === undefined && input.carryover === undefined) {
+        throw new Error(
+          'setBudgetAmount requires at least one of budgeted or carryover',
+        );
+      }
+
+      return executeWrite(async (apiAdapter) => {
+        const beforeMonth = await fetchBudgetMonthSummary(apiAdapter, input.month);
+        const previous = beforeMonth.categories.find(
+          (c) => c.id === input.categoryId,
+        );
+        if (!previous) {
+          throw new Error(
+            `Category not found in Budget Month ${input.month}: ${input.categoryId}`,
+          );
+        }
+
+        if (input.budgeted !== undefined) {
+          if (!apiAdapter.setBudgetAmount) {
+            throw new Error(
+              'setBudgetAmount is not supported by the current API adapter',
+            );
+          }
+          await apiAdapter.setBudgetAmount(
+            input.month,
+            input.categoryId,
+            decimalToMinorAmount(input.budgeted),
+          );
+        }
+
+        if (input.carryover !== undefined) {
+          if (!apiAdapter.setBudgetCarryover) {
+            throw new Error(
+              'setBudgetCarryover is not supported by the current API adapter',
+            );
+          }
+          await apiAdapter.setBudgetCarryover(
+            input.month,
+            input.categoryId,
+            input.carryover,
+          );
+        }
+
+        const afterMonth = await fetchBudgetMonthSummary(apiAdapter, input.month);
+        const updated = afterMonth.categories.find(
+          (c) => c.id === input.categoryId,
+        ) ?? {
+          ...previous,
+          ...(input.budgeted !== undefined ? { budgeted: input.budgeted } : {}),
+          ...(input.carryover !== undefined ? { carryover: input.carryover } : {}),
+        };
+
+        return {
+          month: input.month,
+          categoryId: input.categoryId,
+          previous,
+          updated,
+        };
+      });
     },
   };
 }

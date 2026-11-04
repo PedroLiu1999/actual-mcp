@@ -8,6 +8,11 @@
 
 set -euo pipefail
 
+# Reopen stdin from /dev/tty if running via pipe (e.g. curl ... | bash)
+if [[ ! -t 0 ]] && [[ -r /dev/tty ]]; then
+  exec < /dev/tty
+fi
+
 # ──────────────────────────────────────────────────────────────────────────
 # Wizard library: delightful, consistent UX, identical across every wizard.
 # ──────────────────────────────────────────────────────────────────────────
@@ -183,11 +188,12 @@ finish() {
   _clear
   printf '\n%s%s  ✓ Setup complete!%s\n\n' "$BOLD" "$GREEN" "$RESET"
   (( ${#WRITTEN_ENV[@]} ))    && note "Saved ${#WRITTEN_ENV[@]} configuration value(s) in $ENV_FILE"
-  printf '\n%sNext steps on your VPS:%s\n' "$BOLD" "$RESET"
-  say "1. Run: docker compose up -d"
-  say "2. Verify health: curl -fsS http://127.0.0.1:${PORT:-3000}/healthz"
-  say "3. Ensure Cloudflare Tunnel points your public hostname to http://localhost:${PORT:-3000}"
-  say "4. Open Google Gemini > Settings > Connected Apps > Connect to an MCP server"
+  printf '\n%sContainer status & next steps:%s\n' "$BOLD" "$RESET"
+  say "1. View logs:    docker compose logs -f actual-mcp"
+  say "2. Restart:      docker compose restart actual-mcp"
+  say "3. Verify local: curl -fsS http://127.0.0.1:${PORT:-3000}/healthz"
+  say "4. Verify public: curl -fsS ${PUBLIC_URL}/healthz"
+  say "5. Connect in Gemini: Settings > Connected Apps > Connect to an MCP server"
   printf '\n'
 }
 
@@ -200,6 +206,18 @@ run_wizard() {
 TOTAL_STAGES=6
 
 banner "Actual MCP Setup & Gemini Deployment Wizard"
+
+# Ensure data directory and docker-compose.yml exist in current working directory
+mkdir -p data
+if [[ ! -f "docker-compose.yml" ]]; then
+  DOCKER_COMPOSE_URL="https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/docker-compose.yml"
+  printf '  %s• Downloading docker-compose.yml from GitHub...%s\n' "$BLUE" "$RESET"
+  if curl -fsSL "$DOCKER_COMPOSE_URL" -o docker-compose.yml; then
+    printf '  %s✓ Saved docker-compose.yml%s\n\n' "$GREEN" "$RESET"
+  else
+    warn "Failed to download docker-compose.yml from $DOCKER_COMPOSE_URL. You can download it manually."
+  fi
+fi
 
 # ── Stage 1: Public Domain & Port ──────────────────────────────────────────
 stage "Public Domain & Local Port"
@@ -320,9 +338,18 @@ say "  In Cloudflare Zero Trust (or your VPS cloudflared config.yml):"
 say "  Point hostname: ${PUBLIC_URL#https://}"
 say "  To service:     http://localhost:${PORT:-3000}"
 printf '\n'
-step "To start or restart the container on your VPS:"
-say "  docker compose pull && docker compose up -d"
-say "  (or: docker compose up -d --build if building from source)"
+
+step "Starting container:"
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  if confirm "Start actual-mcp container with Docker Compose now?"; then
+    say "Pulling pre-built container image and starting..."
+    docker compose pull && docker compose up -d || warn "Docker startup encountered an error. Check 'docker compose logs'."
+  else
+    say "Skipped. You can start it later with: docker compose pull && docker compose up -d"
+  fi
+else
+  warn "docker or docker compose not detected on PATH. Start later with: docker compose pull && docker compose up -d"
+fi
 printf '\n'
 pause "Press Enter after you have started the container and Cloudflare Tunnel"
 

@@ -88,34 +88,22 @@ All tools return structured JSON serialized in MCP text content blocks and inclu
 
 ---
 
-## Quick Start (Zero-Clone)
+## Quick Start (One-Command Setup)
 
-Deploy in seconds on your VPS without cloning the repository by downloading `docker-compose.yml` and the interactive setup wizard:
+Deploy in seconds on your VPS without cloning the repository. In your terminal, run:
 
 ```bash
-# 1. Create a directory and switch into it
-mkdir -p actual-mcp && cd actual-mcp
-
-# 2. Download docker-compose.yml and the setup wizard
-curl -fsSL https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/docker-compose.yml -o docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/scripts/setup-wizard.sh -o setup-wizard.sh
-chmod +x setup-wizard.sh
-
-# 3. Run the interactive setup wizard
-./setup-wizard.sh
-
-# 4. Pull and run the prebuilt Docker image
-docker compose pull
-docker compose up -d
+mkdir -p actual-mcp && cd actual-mcp && bash -c "$(curl -fsSL https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/scripts/setup-wizard.sh)"
 ```
 
-The wizard guides you through:
-1. **Public URL & Port**: Sets `PUBLIC_URL` and loopback `PORT` (default `3000`).
-2. **OAuth Credentials**: Generates a cryptographically random `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET`, and prompts for an `OAUTH_ADMIN_PASSWORD` for the `/authorize` consent page.
-3. **Actual Budget Sync Server**: Configures `ACTUAL_SERVER_URL` and `ACTUAL_PASSWORD`.
-4. **Target Budget & Encryption**: Captures `ACTUAL_SYNC_ID` and optional `ACTUAL_ENCRYPTION_PASSWORD`.
-5. **Deployment & Healthcheck**: Verifies Docker startup and runs local and public `/healthz` checks.
-6. **Gemini Custom Connector**: Displays the exact `MCP server URL`, `Client ID`, and `Client secret` to paste into Google Gemini's "Connect to an MCP server" modal.
+The interactive wizard handles everything end-to-end:
+1. **Auto-Downloads `docker-compose.yml`**: Fetches the compose file and creates the persistent `data/` directory.
+2. **Configures `.env`**: Sets up `PUBLIC_URL` (for your Cloudflare Tunnel) and loopback `PORT` (default `3000`).
+3. **OAuth Credentials**: Generates a random `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET`, and prompts for an `OAUTH_ADMIN_PASSWORD`.
+4. **Actual Budget Connection**: Prompts for `ACTUAL_SERVER_URL`, server password, and `ACTUAL_SYNC_ID`.
+5. **Starts Docker Container**: Offers to pull the pre-built image from GHCR and start it (`docker compose pull && docker compose up -d`).
+6. **Healthchecks**: Tests local and public `/healthz` endpoints.
+7. **Gemini Custom Connector**: Displays the exact `MCP server URL`, `Client ID`, and `Client secret` to paste into Google Gemini.
 
 ---
 

@@ -1,6 +1,14 @@
 import fs from 'node:fs';
 import * as actualApi from '@actual-app/api';
 import { decimalToMinorAmount, minorToDecimalAmount } from '../currency.js';
+import {
+  collectMonetaryKeys,
+  compileStructuredAqlQuery,
+  convertAqlRowAmounts,
+  structuredAqlQueryInputSchema,
+  type AqlQueryResult,
+  type StructuredAqlQueryInput,
+} from './aql.js';
 import type {
   AccountSummary,
   BudgetGateway,
@@ -13,10 +21,13 @@ import type {
   CreateTransactionsInput,
   CreateTransactionsResult,
   DeleteTransactionResult,
+  GetSpendingSummaryInput,
   GetTransactionsFilter,
   PayeeSummary,
   SetBudgetAmountInput,
   SetBudgetAmountResult,
+  SpendingSummary,
+  SpendingSummaryGroup,
   TransactionRecord,
   UpdateTransactionInput,
   UpdateTransactionResult,
@@ -145,6 +156,8 @@ export interface ActualApiAdapter {
   deleteTransaction?(id: string): Promise<unknown>;
   setBudgetAmount?(month: string, categoryId: string, value: number): Promise<void>;
   setBudgetCarryover?(month: string, categoryId: string, flag: boolean): Promise<void>;
+  q?: typeof actualApi.q;
+  aqlQuery?(query: ReturnType<typeof actualApi.q>): Promise<unknown>;
 }
 
 export interface SignalTarget {
@@ -185,6 +198,8 @@ export interface ActualBudgetGateway extends BudgetGateway {
     options?: { forceSync?: boolean },
   ): Promise<T>;
   executeWrite<T>(operation: (api: ActualApiAdapter) => Promise<T>): Promise<T>;
+  getSpendingSummary(input: GetSpendingSummaryInput): Promise<SpendingSummary>;
+  runAqlQuery(input: StructuredAqlQueryInput): Promise<AqlQueryResult>;
 }
 
 export function createActualBudgetGateway(
@@ -542,6 +557,134 @@ export function createActualBudgetGateway(
 
         return summaries;
       }, readOptions);
+    },
+    async getSpendingSummary(input: GetSpendingSummaryInput): Promise<SpendingSummary> {
+      const groupBy = input.groupBy ?? 'category';
+      const includeTransfers = Boolean(input.includeTransfers);
+      const includeOffBudget = Boolean(input.includeOffBudget);
+
+      return executeRead(
+        async (apiAdapter) => {
+          if (!apiAdapter.aqlQuery) {
+            throw new Error('Actual API adapter does not support aqlQuery');
+          }
+          const qBuilder = apiAdapter.q ?? actualApi.q;
+
+          const filters: Array<Record<string, unknown>> = [
+            { date: { $gte: input.startDate } },
+            { date: { $lte: input.endDate } },
+          ];
+          if (!includeOffBudget) {
+            filters.push({ 'account.offbudget': false });
+          }
+          if (!includeTransfers) {
+            filters.push({ 'payee.transfer_acct': null });
+          }
+
+          let query = qBuilder('transactions')
+            .filter({ $and: filters })
+            .options({ splits: 'inline' });
+
+          if (groupBy === 'category') {
+            query = query
+              .groupBy(['category', 'category.name'])
+              .select([
+                'category',
+                'category.name',
+                { total: { $sum: '$amount' } },
+                { count: { $count: '$id' } },
+              ]);
+          } else if (groupBy === 'payee') {
+            query = query
+              .groupBy(['payee', 'payee.name'])
+              .select([
+                'payee',
+                'payee.name',
+                { total: { $sum: '$amount' } },
+                { count: { $count: '$id' } },
+              ]);
+          } else {
+            query = query
+              .groupBy({ $month: '$date' })
+              .select([
+                { month: { $month: '$date' } },
+                { total: { $sum: '$amount' } },
+                { count: { $count: '$id' } },
+              ]);
+          }
+
+          const queryResult = (await apiAdapter.aqlQuery(query)) as { data?: unknown } | undefined;
+          const data = queryResult?.data;
+          const rows = Array.isArray(data) ? (data as Array<Record<string, unknown>>) : [];
+
+          let totalMinor = 0;
+          const groups: SpendingSummaryGroup[] = rows.map((row) => {
+            const rowMinor = typeof row.total === 'number' ? row.total : 0;
+            const rowCount = typeof row.count === 'number' ? row.count : 0;
+            totalMinor += rowMinor;
+
+            if (groupBy === 'category') {
+              return {
+                categoryId: (row.category as string | null | undefined) ?? null,
+                categoryName: (row['category.name'] as string | null | undefined) ?? null,
+                total: minorToDecimalAmount(rowMinor),
+                count: rowCount,
+              };
+            }
+            if (groupBy === 'payee') {
+              return {
+                payeeId: (row.payee as string | null | undefined) ?? null,
+                payeeName: (row['payee.name'] as string | null | undefined) ?? null,
+                total: minorToDecimalAmount(rowMinor),
+                count: rowCount,
+              };
+            }
+            return {
+              month: String(row.month ?? ''),
+              total: minorToDecimalAmount(rowMinor),
+              count: rowCount,
+            };
+          });
+
+          return {
+            startDate: input.startDate,
+            endDate: input.endDate,
+            groupBy,
+            includeTransfers,
+            includeOffBudget,
+            total: minorToDecimalAmount(totalMinor),
+            groups,
+          };
+        },
+        input.forceSync !== undefined ? { forceSync: input.forceSync } : undefined,
+      );
+    },
+    async runAqlQuery(input: StructuredAqlQueryInput): Promise<AqlQueryResult> {
+      const parsed = structuredAqlQueryInputSchema.parse(input);
+      const monetaryKeys = collectMonetaryKeys(parsed);
+
+      return executeRead(
+        async (apiAdapter) => {
+          if (!apiAdapter.aqlQuery) {
+            throw new Error('Actual API adapter does not support aqlQuery');
+          }
+          const qBuilder = apiAdapter.q ?? actualApi.q;
+          const query = compileStructuredAqlQuery(parsed, qBuilder);
+          const queryResult = (await apiAdapter.aqlQuery(query)) as { data?: unknown } | undefined;
+          const data = queryResult?.data;
+          const rawRows = Array.isArray(data) ? (data as Array<Record<string, unknown>>) : [];
+          const rows = rawRows.map((row) => convertAqlRowAmounts(row, monetaryKeys));
+
+          return {
+            table: parsed.table,
+            limit: parsed.limit,
+            offset: parsed.offset ?? 0,
+            ...(parsed.table === 'transactions' ? { splits: parsed.splits } : {}),
+            rows,
+          };
+        },
+        parsed.forceSync !== undefined ? { forceSync: parsed.forceSync } : undefined,
+      );
     },
     async getTransactions(
       filter?: GetTransactionsFilter,

@@ -105,6 +105,66 @@ export interface TransactionRecord {
   subtransactions?: TransactionRecord[];
 }
 
+export interface CreateTransactionItemInput {
+  date: string;
+  /** Transaction amount expressed as a Decimal Amount (negative for Outflow, positive for Inflow). */
+  amount: number;
+  payeeName?: string;
+  payeeId?: string;
+  categoryId?: string;
+  notes?: string;
+  cleared?: boolean;
+  importedId?: string;
+}
+
+export interface CreateTransactionsInput {
+  accountId: string;
+  transactions: CreateTransactionItemInput[];
+  runRules?: boolean;
+}
+
+export interface CreateTransactionsResult {
+  mode: 'import' | 'add';
+  added: string[];
+  updated: string[];
+  errors: unknown[];
+}
+
+export interface UpdateTransactionInput {
+  id: string;
+  date?: string;
+  /** Transaction amount expressed as a Decimal Amount (negative for Outflow, positive for Inflow). */
+  amount?: number;
+  payeeId?: string | null;
+  categoryId?: string | null;
+  notes?: string | null;
+  cleared?: boolean;
+}
+
+export interface UpdateTransactionResult {
+  previous: TransactionRecord;
+  updated: TransactionRecord;
+}
+
+export interface DeleteTransactionResult {
+  deleted: TransactionRecord;
+}
+
+export interface SetBudgetAmountInput {
+  month: string;
+  categoryId: string;
+  /** Monthly budgeted envelope allocation expressed as a Decimal Amount. */
+  budgeted?: number;
+  carryover?: boolean;
+}
+
+export interface SetBudgetAmountResult {
+  month: string;
+  categoryId: string;
+  previous: BudgetMonthCategorySummary;
+  updated: BudgetMonthCategorySummary;
+}
+
 export interface BudgetReadiness {
   ready: boolean;
   syncId: string;
@@ -122,6 +182,10 @@ export interface BudgetGateway {
     month: string,
     options?: { forceSync?: boolean },
   ): Promise<BudgetMonthSummary>;
+  createTransactions?(input: CreateTransactionsInput): Promise<CreateTransactionsResult>;
+  updateTransaction?(input: UpdateTransactionInput): Promise<UpdateTransactionResult>;
+  deleteTransaction?(id: string): Promise<DeleteTransactionResult>;
+  setBudgetAmount?(input: SetBudgetAmountInput): Promise<SetBudgetAmountResult>;
   initialize?(): Promise<void>;
   sync?(): Promise<void>;
   shutdown?(): Promise<void>;

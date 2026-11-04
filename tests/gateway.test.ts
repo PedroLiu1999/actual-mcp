@@ -527,3 +527,511 @@ describe('BudgetGateway seam — graceful shutdown & signal draining', () => {
     }
   });
 });
+
+describe('BudgetGateway seam — createActualBudgetGateway listCategories', () => {
+  it('returns category groups and their categories with normalized boolean flags', async () => {
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      getCategoryGroups: async () => [
+        {
+          id: 'grp-income',
+          name: 'Income',
+          is_income: true,
+          hidden: false,
+          categories: [
+            {
+              id: 'cat-salary',
+              name: 'Salary',
+              group_id: 'grp-income',
+              is_income: true,
+              hidden: false,
+            },
+          ],
+        },
+        {
+          id: 'grp-expenses',
+          name: 'Usual Expenses',
+          is_income: false,
+          hidden: false,
+          categories: [
+            {
+              id: 'cat-groceries',
+              name: 'Groceries',
+              group_id: 'grp-expenses',
+              is_income: false,
+              hidden: false,
+            },
+            {
+              id: 'cat-old-sub',
+              name: 'Old Subscription',
+              group_id: 'grp-expenses',
+              is_income: false,
+              hidden: true,
+            },
+          ],
+        },
+      ],
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+    });
+
+    const groups = await gateway.listCategories();
+
+    expect(groups).toEqual([
+      {
+        id: 'grp-income',
+        name: 'Income',
+        is_income: true,
+        hidden: false,
+        categories: [
+          {
+            id: 'cat-salary',
+            name: 'Salary',
+            group_id: 'grp-income',
+            is_income: true,
+            hidden: false,
+          },
+        ],
+      },
+      {
+        id: 'grp-expenses',
+        name: 'Usual Expenses',
+        is_income: false,
+        hidden: false,
+        categories: [
+          {
+            id: 'cat-groceries',
+            name: 'Groceries',
+            group_id: 'grp-expenses',
+            is_income: false,
+            hidden: false,
+          },
+          {
+            id: 'cat-old-sub',
+            name: 'Old Subscription',
+            group_id: 'grp-expenses',
+            is_income: false,
+            hidden: true,
+          },
+        ],
+      },
+    ]);
+  });
+});
+
+describe('BudgetGateway seam — createActualBudgetGateway listPayees', () => {
+  it('returns payees with id, name, and normalized transfer_acct', async () => {
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      getPayees: async () => [
+        { id: 'payee-coffee', name: 'Blue Bottle Coffee' },
+        { id: 'payee-transfer', name: 'Transfer : Savings', transfer_acct: 'acc-savings' },
+      ],
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+    });
+
+    const payees = await gateway.listPayees();
+
+    expect(payees).toEqual([
+      {
+        id: 'payee-coffee',
+        name: 'Blue Bottle Coffee',
+        transfer_acct: null,
+      },
+      {
+        id: 'payee-transfer',
+        name: 'Transfer : Savings',
+        transfer_acct: 'acc-savings',
+      },
+    ]);
+  });
+});
+
+describe('BudgetGateway seam — createActualBudgetGateway listBudgetMonths & getBudgetMonth', () => {
+  it('returns the sorted list of available YYYY-MM Budget Months', async () => {
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      getBudgetMonths: async () => ['2026-11', '2026-09', '2026-10'],
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+    });
+
+    const months = await gateway.listBudgetMonths();
+    expect(months).toEqual(['2026-09', '2026-10', '2026-11']);
+  });
+
+  it('converts all monthly envelope summary and per-category Minor Unit Amounts to Decimal Amounts in getBudgetMonth', async () => {
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      getBudgetMonth: async (month: string) => ({
+        month,
+        incomeAvailable: 525000,
+        lastMonthOverspent: -1500,
+        forNextMonth: 50000,
+        totalBudgeted: -320050,
+        toBudget: 153450,
+        fromLastMonth: 25000,
+        totalIncome: 500000,
+        totalSpent: -184575,
+        totalBalance: 135475,
+        categoryGroups: [
+          {
+            id: 'grp-income',
+            name: 'Income',
+            is_income: true,
+            hidden: false,
+            received: 500000,
+            categories: [
+              {
+                id: 'cat-paycheck',
+                name: 'Paycheck',
+                group_id: 'grp-income',
+                is_income: true,
+                hidden: false,
+                received: 500000,
+              },
+            ],
+          },
+          {
+            id: 'grp-living',
+            name: 'Living Expenses',
+            is_income: false,
+            hidden: false,
+            budgeted: 80000,
+            spent: -54525,
+            balance: 25475,
+            categories: [
+              {
+                id: 'cat-groceries',
+                name: 'Groceries',
+                group_id: 'grp-living',
+                is_income: false,
+                hidden: false,
+                budgeted: 60000,
+                spent: -42025,
+                balance: 17975,
+                carryover: true,
+              },
+              {
+                id: 'cat-dining',
+                name: 'Dining Out',
+                group_id: 'grp-living',
+                is_income: false,
+                hidden: false,
+                budgeted: 20000,
+                spent: -12500,
+                balance: 7500,
+                carryover: 0,
+              },
+            ],
+          },
+        ],
+      }),
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+    });
+
+    const summary = await gateway.getBudgetMonth('2026-11');
+
+    expect(summary).toEqual({
+      month: '2026-11',
+      incomeAvailable: 5250,
+      lastMonthOverspent: -15,
+      forNextMonth: 500,
+      totalBudgeted: -3200.5,
+      toBudget: 1534.5,
+      fromLastMonth: 250,
+      totalIncome: 5000,
+      totalSpent: -1845.75,
+      totalBalance: 1354.75,
+      categoryGroups: [
+        {
+          id: 'grp-income',
+          name: 'Income',
+          is_income: true,
+          hidden: false,
+          budgeted: 0,
+          spent: 5000,
+          balance: 0,
+          received: 5000,
+          categories: [
+            {
+              id: 'cat-paycheck',
+              name: 'Paycheck',
+              group_id: 'grp-income',
+              is_income: true,
+              hidden: false,
+              budgeted: 0,
+              spent: 5000,
+              balance: 0,
+              carryover: false,
+              received: 5000,
+            },
+          ],
+        },
+        {
+          id: 'grp-living',
+          name: 'Living Expenses',
+          is_income: false,
+          hidden: false,
+          budgeted: 800,
+          spent: -545.25,
+          balance: 254.75,
+          categories: [
+            {
+              id: 'cat-groceries',
+              name: 'Groceries',
+              group_id: 'grp-living',
+              is_income: false,
+              hidden: false,
+              budgeted: 600,
+              spent: -420.25,
+              balance: 179.75,
+              carryover: true,
+            },
+            {
+              id: 'cat-dining',
+              name: 'Dining Out',
+              group_id: 'grp-living',
+              is_income: false,
+              hidden: false,
+              budgeted: 200,
+              spent: -125,
+              balance: 75,
+              carryover: false,
+            },
+          ],
+        },
+      ],
+      categories: [
+        {
+          id: 'cat-paycheck',
+          name: 'Paycheck',
+          group_id: 'grp-income',
+          is_income: true,
+          hidden: false,
+          budgeted: 0,
+          spent: 5000,
+          balance: 0,
+          carryover: false,
+          received: 5000,
+        },
+        {
+          id: 'cat-groceries',
+          name: 'Groceries',
+          group_id: 'grp-living',
+          is_income: false,
+          hidden: false,
+          budgeted: 600,
+          spent: -420.25,
+          balance: 179.75,
+          carryover: true,
+        },
+        {
+          id: 'cat-dining',
+          name: 'Dining Out',
+          group_id: 'grp-living',
+          is_income: false,
+          hidden: false,
+          budgeted: 200,
+          spent: -125,
+          balance: 75,
+          carryover: false,
+        },
+      ],
+    });
+  });
+});
+
+describe('BudgetGateway seam — createActualBudgetGateway getTransactions', () => {
+  const sampleAccounts = [
+    { id: 'acc-checking', name: 'Main Checking', offbudget: false, closed: false },
+    { id: 'acc-credit', name: 'Visa Card', offbudget: false, closed: false },
+  ];
+  const sampleCategories = [
+    { id: 'cat-groceries', name: 'Groceries', group_id: 'grp-1', is_income: false, hidden: false },
+    { id: 'cat-coffee', name: 'Coffee Shops', group_id: 'grp-1', is_income: false, hidden: false },
+  ];
+  const samplePayees = [
+    { id: 'payee-trader-joes', name: "Trader Joe's", transfer_acct: null },
+    { id: 'payee-blue-bottle', name: 'Blue Bottle Coffee', transfer_acct: null },
+  ];
+  const sampleRawTransactions = [
+    {
+      id: 'tx-1',
+      account: 'acc-checking',
+      date: '2026-11-01',
+      amount: -8450,
+      payee: 'payee-trader-joes',
+      category: 'cat-groceries',
+      notes: 'Weekly produce haul',
+      cleared: true,
+    },
+    {
+      id: 'tx-2',
+      account: 'acc-credit',
+      date: '2026-11-02',
+      amount: -675,
+      payee: 'payee-blue-bottle',
+      category: 'cat-coffee',
+      notes: 'Iced oat latte',
+      cleared: false,
+    },
+    {
+      id: 'tx-3',
+      account: 'acc-checking',
+      date: '2026-11-04',
+      amount: -1230,
+      payee: 'payee-trader-joes',
+      category: 'cat-groceries',
+      notes: 'Quick snack run',
+      cleared: true,
+    },
+  ];
+
+  it('enriches transactions with accountName, categoryName, and payeeName alongside IDs and converts Minor Unit Amounts to Decimal Amounts', async () => {
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => sampleAccounts,
+      getAccountBalance: async () => 0,
+      getCategories: async () => sampleCategories,
+      getPayees: async () => samplePayees,
+      getTransactions: async () => sampleRawTransactions,
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+    });
+
+    const transactions = await gateway.getTransactions();
+
+    expect(transactions).toEqual([
+      {
+        id: 'tx-1',
+        account: 'acc-checking',
+        accountId: 'acc-checking',
+        accountName: 'Main Checking',
+        date: '2026-11-01',
+        amount: -84.5,
+        payee: 'payee-trader-joes',
+        payeeId: 'payee-trader-joes',
+        payeeName: "Trader Joe's",
+        category: 'cat-groceries',
+        categoryId: 'cat-groceries',
+        categoryName: 'Groceries',
+        notes: 'Weekly produce haul',
+        cleared: true,
+      },
+      {
+        id: 'tx-2',
+        account: 'acc-credit',
+        accountId: 'acc-credit',
+        accountName: 'Visa Card',
+        date: '2026-11-02',
+        amount: -6.75,
+        payee: 'payee-blue-bottle',
+        payeeId: 'payee-blue-bottle',
+        payeeName: 'Blue Bottle Coffee',
+        category: 'cat-coffee',
+        categoryId: 'cat-coffee',
+        categoryName: 'Coffee Shops',
+        notes: 'Iced oat latte',
+        cleared: false,
+      },
+      {
+        id: 'tx-3',
+        account: 'acc-checking',
+        accountId: 'acc-checking',
+        accountName: 'Main Checking',
+        date: '2026-11-04',
+        amount: -12.3,
+        payee: 'payee-trader-joes',
+        payeeId: 'payee-trader-joes',
+        payeeName: "Trader Joe's",
+        category: 'cat-groceries',
+        categoryId: 'cat-groceries',
+        categoryName: 'Groceries',
+        notes: 'Quick snack run',
+        cleared: true,
+      },
+    ]);
+  });
+
+  it('filters transactions by accountId, startDate, endDate, categoryId, payeeId, case-insensitive searchText (payee name or notes), and limit', async () => {
+    const getTransactionsCalls: Array<{
+      accountId: string;
+      startDate: string;
+      endDate: string;
+    }> = [];
+
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => sampleAccounts,
+      getAccountBalance: async () => 0,
+      getCategories: async () => sampleCategories,
+      getPayees: async () => samplePayees,
+      getTransactions: async (accountId, startDate, endDate) => {
+        getTransactionsCalls.push({ accountId, startDate, endDate });
+        return sampleRawTransactions;
+      },
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+    });
+
+    // Filter by accountId + date range
+    const byAccountAndDate = await gateway.getTransactions({
+      accountId: 'acc-checking',
+      startDate: '2026-11-02',
+      endDate: '2026-11-05',
+    });
+    expect(getTransactionsCalls[0]).toEqual({
+      accountId: 'acc-checking',
+      startDate: '2026-11-02',
+      endDate: '2026-11-05',
+    });
+    expect(byAccountAndDate.map((t) => t.id)).toEqual(['tx-3']);
+
+    // Filter by categoryId
+    const byCategory = await gateway.getTransactions({ categoryId: 'cat-coffee' });
+    expect(byCategory.map((t) => t.id)).toEqual(['tx-2']);
+
+    // Filter by payeeId
+    const byPayee = await gateway.getTransactions({ payeeId: 'payee-trader-joes' });
+    expect(byPayee.map((t) => t.id)).toEqual(['tx-1', 'tx-3']);
+
+    // Filter by case-insensitive searchText matching payeeName
+    const byPayeeSearch = await gateway.getTransactions({ searchText: 'BLUE BOTTLE' });
+    expect(byPayeeSearch.map((t) => t.id)).toEqual(['tx-2']);
+
+    // Filter by case-insensitive searchText matching notes
+    const byNotesSearch = await gateway.getTransactions({ searchText: 'produce' });
+    expect(byNotesSearch.map((t) => t.id)).toEqual(['tx-1']);
+
+    // Filter with limit
+    const limited = await gateway.getTransactions({ limit: 2 });
+    expect(limited.map((t) => t.id)).toEqual(['tx-1', 'tx-2']);
+  });
+});
+
+
+
+

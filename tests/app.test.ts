@@ -1,7 +1,12 @@
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import type { Express } from 'express';
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
-import { loadConfig } from '../src/config.js';
+import { loadConfig, type AppConfig } from '../src/config.js';
 import type { AccountSummary, BudgetGateway, BudgetReadiness } from '../src/gateway/types.js';
 
 function createStubGateway(overrides: {
@@ -37,17 +42,62 @@ function createStubGateway(overrides: {
   };
 }
 
-const testConfig = loadConfig({
-  PUBLIC_URL: 'https://mcp.example.com',
-  PORT: '3000',
-  DATA_DIR: '/tmp/actual-mcp-test-data',
-  OAUTH_CLIENT_ID: 'gemini-client',
-  OAUTH_CLIENT_SECRET: 'super-secret',
-  OAUTH_ADMIN_PASSWORD: 'admin-password',
-  ACTUAL_SERVER_URL: 'http://localhost:5006',
-  ACTUAL_PASSWORD: 'actual-password',
-  ACTUAL_SYNC_ID: '11111111-2222-3333-4444-555555555555',
+let tempDataDir: string;
+let testConfig: AppConfig;
+
+beforeEach(() => {
+  tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-mcp-app-test-'));
+  testConfig = loadConfig({
+    PUBLIC_URL: 'https://mcp.example.com',
+    PORT: '3000',
+    DATA_DIR: tempDataDir,
+    OAUTH_CLIENT_ID: 'gemini-client',
+    OAUTH_CLIENT_SECRET: 'super-secret',
+    OAUTH_ADMIN_PASSWORD: 'admin-password',
+    ACTUAL_SERVER_URL: 'http://localhost:5006',
+    ACTUAL_PASSWORD: 'actual-password',
+    ACTUAL_SYNC_ID: '11111111-2222-3333-4444-555555555555',
+  });
 });
+
+afterEach(() => {
+  fs.rmSync(tempDataDir, { recursive: true, force: true });
+});
+
+async function issueBearerToken(app: Express): Promise<string> {
+  const redirectUri = 'https://oauth-redirect.googleusercontent.com/r/app-test';
+  const codeVerifier = 'app-test-pkce-verifier-with-sufficient-entropy-0123456789';
+  const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
+
+  const authRes = await request(app)
+    .post('/authorize')
+    .set('Host', 'mcp.example.com')
+    .type('form')
+    .send({
+      response_type: 'code',
+      client_id: testConfig.OAUTH_CLIENT_ID,
+      redirect_uri: redirectUri,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
+      password: testConfig.OAUTH_ADMIN_PASSWORD,
+    });
+
+  const code = new URL(authRes.headers.location).searchParams.get('code')!;
+  const tokenRes = await request(app)
+    .post('/token')
+    .set('Host', 'mcp.example.com')
+    .type('form')
+    .send({
+      grant_type: 'authorization_code',
+      client_id: testConfig.OAUTH_CLIENT_ID,
+      client_secret: testConfig.OAUTH_CLIENT_SECRET,
+      code,
+      code_verifier: codeVerifier,
+      redirect_uri: redirectUri,
+    });
+
+  return tokenRes.body.access_token as string;
+}
 
 describe('HTTP application seam — healthz & host validation', () => {
   it('enables reverse proxy trust (trust proxy: 1)', () => {
@@ -103,10 +153,12 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
 
   it('handles initialize on POST /mcp as stateless JSON response without Mcp-Session-Id', async () => {
     const app = createApp({ config: testConfig, budgetGateway: createStubGateway() });
+    const token = await issueBearerToken(app);
 
     const res = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -131,10 +183,12 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
 
   it('exposes list_accounts with readOnlyHint: true and destructiveHint: false on tools/list', async () => {
     const app = createApp({ config: testConfig, budgetGateway: createStubGateway() });
+    const token = await issueBearerToken(app);
 
     const res = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({
@@ -187,10 +241,12 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     };
 
     const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
 
     const res = await request(app)
       .post('/mcp')
       .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
       .set('Accept', 'application/json, text/event-stream')
       .set('Content-Type', 'application/json')
       .send({

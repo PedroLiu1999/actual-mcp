@@ -1,0 +1,31 @@
+{
+  "name": "actual-mcp",
+  "version": "0.1.0",
+  "description": "Self-contained MCP server for Actual Budget over Streamable HTTP and OAuth 2.1",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@actual-app/api": "^26.11.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.0",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0"
+  }
+}

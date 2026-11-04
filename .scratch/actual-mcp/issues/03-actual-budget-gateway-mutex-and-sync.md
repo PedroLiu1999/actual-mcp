@@ -4,11 +4,11 @@
 
 **Blocked by:** 01: Walking Skeleton — Express App, Config, Healthcheck, Stateless MCP & list_accounts
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] On initialization, ensures the local Budget Cache directory exists on disk, initializes `@actual-app/api` with `serverURL` and `password`, and opens the Target Budget via `downloadBudget(syncId, { password: encryptionPassword })`.
-- [ ] All operations on `ActualBudgetGateway` (reads, writes, explicit syncs, and shutdown) execute sequentially through a single process-wide non-reentrant FIFO mutex so concurrent callers never overlap.
-- [ ] Read operations implement Coalesced Sync: if the time since the last successful sync exceeds `SYNC_TTL_SECONDS` (default 30 seconds) or `forceSync: true` is passed, `sync()` runs before reading; otherwise, the cached state is read without a network round-trip.
-- [ ] Write operations run `sync()` before mutating, execute the mutation, and immediately `await sync()` and update the last-synced timestamp before resolving.
-- [ ] Graceful shutdown (`shutdown()` and `SIGTERM`/`SIGINT` handlers) waits for queued mutex operations to finish, runs a final `sync()`, and invokes `@actual-app/api`'s `shutdown()`.
-- [ ] Adapter seam tests verify FIFO mutex serialization under concurrent calls, Coalesced Sync TTL skipping vs refreshing, pre/post write syncing, and clean shutdown draining.
+- [x] On initialization, ensures the local Budget Cache directory exists on disk, initializes `@actual-app/api` with `serverURL` and `password`, and opens the Target Budget via `downloadBudget(syncId, { password: encryptionPassword })`.
+- [x] All operations on `ActualBudgetGateway` (reads, writes, explicit syncs, and shutdown) execute sequentially through a single process-wide non-reentrant FIFO mutex so concurrent callers never overlap.
+- [x] Read operations implement Coalesced Sync: if the time since the last successful sync exceeds `SYNC_TTL_SECONDS` (default 30 seconds) or `forceSync: true` is passed, `sync()` runs before reading; otherwise, the cached state is read without a network round-trip.
+- [x] Write operations run `sync()` before mutating, execute the mutation, and immediately `await sync()` and update the last-synced timestamp before resolving.
+- [x] Graceful shutdown (`shutdown()` and `SIGTERM`/`SIGINT` handlers) waits for queued mutex operations to finish, runs a final `sync()`, and invokes `@actual-app/api`'s `shutdown()`.
+- [x] Adapter seam tests verify FIFO mutex serialization under concurrent calls, Coalesced Sync TTL skipping vs refreshing, pre/post write syncing, and clean shutdown draining.

@@ -88,9 +88,27 @@ All tools return structured JSON serialized in MCP text content blocks and inclu
 
 ---
 
+## Setup Wizard (Recommended)
+
+To configure `.env`, generate secure secrets, test connections, and get the exact values to paste into Google Gemini interactively, run the interactive setup wizard:
+
+```bash
+./scripts/setup-wizard.sh
+```
+
+The wizard guides you through:
+1. **Public URL & Port**: Sets `PUBLIC_URL` and loopback `PORT` (default `3000`).
+2. **OAuth Credentials**: Generates a cryptographically random `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET`, and prompts for an `OAUTH_ADMIN_PASSWORD` for the `/authorize` consent page.
+3. **Actual Budget Sync Server**: Configures `ACTUAL_SERVER_URL` and `ACTUAL_PASSWORD`.
+4. **Target Budget & Encryption**: Captures `ACTUAL_SYNC_ID` and optional `ACTUAL_ENCRYPTION_PASSWORD`.
+5. **Deployment & Healthcheck**: Verifies Docker startup and runs local and public `/healthz` checks.
+6. **Gemini Custom Connector**: Displays the exact `MCP server URL`, `Client ID`, and `Client secret` to paste into Google Gemini's "Connect to an MCP server" modal.
+
+---
+
 ## Environment Variables
 
-Copy `.env.example` to `.env` and configure the following variables:
+Copy `.env.example` to `.env` (or run `./scripts/setup-wizard.sh`):
 
 | Variable | Required | Default | Description |
 | :--- | :---: | :--- | :--- |
@@ -118,10 +136,21 @@ This guide assumes your VPS already runs:
 ### Step 1: Clone & Configure `.env`
 
 ```bash
-git clone <your-repo-url> actual-mcp
+git clone git@github.com:PedroLiu1999/actual-mcp.git
 cd actual-mcp
-cp .env.example .env
 mkdir -p data
+```
+
+You can configure `.env` interactively using the setup wizard:
+
+```bash
+./scripts/setup-wizard.sh
+```
+
+Or configure it manually by copying `.env.example`:
+
+```bash
+cp .env.example .env
 ```
 
 Generate strong secrets for `OAUTH_CLIENT_SECRET` and `OAUTH_ADMIN_PASSWORD`, and fill in your `.env`:

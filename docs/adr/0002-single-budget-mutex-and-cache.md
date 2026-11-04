@@ -1,0 +1,3 @@
+# Single-Budget FIFO Mutex and Local Budget Cache
+
+`@actual-app/api` embeds the `loot-core` engine and a module-level `better-sqlite3` singleton in-process, allowing only one budget to be open per Node.js process and leaving read operations (`getTransactions`, `getBudgetMonth`, `aqlQuery`, etc.) and lifecycle operations (`downloadBudget`, `sync`, `shutdown`) unserialized. `actual-mcp` binds to a single configured `Target Budget` (`ACTUAL_SYNC_ID`), opens it against a persistent local `Budget Cache` (`dataDir`) via `downloadBudget()`, and serializes every `@actual-app/api` call through a process-wide non-reentrant FIFO mutex with Coalesced Sync on reads and immediate `sync()` before and after writes.

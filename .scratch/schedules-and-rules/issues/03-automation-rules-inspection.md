@@ -6,7 +6,7 @@
 
 **Status:** resolved
 
-- [x] `list_rules` returns all automation rules (triggers, stage, conditionsOp, conditions, actions)
+- [x] `list_rules` returns all automation rules (stage, conditionsOp, conditions, actions)
 - [x] Specifying `payeeId` filters rules using `@actual-app/api`'s payee rule indexer
 - [x] Rule amounts in conditions (`field === 'amount'`) and actions (`set-split-amount` or `field === 'amount'`) are converted to Decimal Amounts
 - [x] Tool declares `readOnlyHint: true` and `destructiveHint: false` annotations and supports `forceSync`

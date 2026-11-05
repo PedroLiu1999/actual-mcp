@@ -335,6 +335,33 @@ describe('Rule ActualBudgetGateway Seam', () => {
     expect(rules[0].conditions[1].value).toEqual({ num1: -100.0, num2: -25.0 });
   });
 
+  it('returns default stage when stage is null or default', async () => {
+    const mockRules: ActualRuleRecord[] = [
+      {
+        id: 'r-default',
+        stage: null,
+        conditions_op: 'and',
+        conditions: [{ field: 'payee', op: 'is', value: 'p-1' }],
+        actions: [{ field: 'category', op: 'set', value: 'c-1' }],
+      },
+    ];
+
+    const mockApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      getRules: async () => mockRules,
+      sync: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: mockApi,
+    });
+
+    const rules = await gateway.listRules();
+    expect(rules[0].stage).toBe('default');
+  });
+
   it('converts Decimal Amounts to minor units on createRule and updateRule', async () => {
     const createRuleMock = vi.fn().mockImplementation(async (payload) => ({
       id: 'r-created',

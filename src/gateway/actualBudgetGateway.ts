@@ -364,22 +364,22 @@ export interface ActualBudgetGateway extends BudgetGateway {
 }
 
 function convertScheduleAmountToDecimal(
-  rawAmount: number | { num1: number; num2: number } | null | undefined,
+  minorAmount: number | { num1: number; num2: number } | null | undefined,
 ): ScheduleAmount | null {
-  if (typeof rawAmount === 'number') {
-    return minorToDecimalAmount(rawAmount);
+  if (typeof minorAmount === 'number') {
+    return minorToDecimalAmount(minorAmount);
   }
   if (
-    typeof rawAmount === 'object' &&
-    rawAmount !== null &&
-    'num1' in rawAmount &&
-    'num2' in rawAmount &&
-    typeof rawAmount.num1 === 'number' &&
-    typeof rawAmount.num2 === 'number'
+    typeof minorAmount === 'object' &&
+    minorAmount !== null &&
+    'num1' in minorAmount &&
+    'num2' in minorAmount &&
+    typeof minorAmount.num1 === 'number' &&
+    typeof minorAmount.num2 === 'number'
   ) {
     return {
-      num1: minorToDecimalAmount(rawAmount.num1),
-      num2: minorToDecimalAmount(rawAmount.num2),
+      num1: minorToDecimalAmount(minorAmount.num1),
+      num2: minorToDecimalAmount(minorAmount.num2),
     };
   }
   return null;
@@ -399,13 +399,15 @@ function formatScheduleSummary(rawSchedule: ActualScheduleRecord): ScheduleSumma
   const amount =
     convertScheduleAmountToDecimal(rawSchedule.amount) ??
     convertScheduleAmountToDecimal(rawSchedule._amount);
+  const completed = Boolean(rawSchedule.completed);
 
   return {
     id: rawSchedule.id,
     name: rawSchedule.name ?? null,
     rule: rawSchedule.rule ?? '',
     next_date: rawSchedule.next_date ?? null,
-    completed: Boolean(rawSchedule.completed),
+    completed,
+    status: completed ? 'completed' : 'active',
     posts_transaction: Boolean(rawSchedule.posts_transaction),
     payee: rawSchedule.payee ?? rawSchedule._payee ?? null,
     account: rawSchedule.account ?? rawSchedule._account ?? null,
@@ -415,11 +417,14 @@ function formatScheduleSummary(rawSchedule: ActualScheduleRecord): ScheduleSumma
   };
 }
 
-function convertRuleConditionsToInternal(conditions: RuleCondition[]): RuleCondition[] {
+function transformRuleConditionsAmount(
+  conditions: RuleCondition[],
+  transform: (amount: number) => number,
+): RuleCondition[] {
   return conditions.map((cond) => {
     if (cond.field === 'amount') {
       if (typeof cond.value === 'number') {
-        return { ...cond, value: toMinorUnits(cond.value) };
+        return { ...cond, value: transform(cond.value) };
       }
       if (
         typeof cond.value === 'object' &&
@@ -433,8 +438,8 @@ function convertRuleConditionsToInternal(conditions: RuleCondition[]): RuleCondi
         return {
           ...cond,
           value: {
-            num1: toMinorUnits(val.num1),
-            num2: toMinorUnits(val.num2),
+            num1: transform(val.num1),
+            num2: transform(val.num2),
           },
         };
       }
@@ -443,57 +448,32 @@ function convertRuleConditionsToInternal(conditions: RuleCondition[]): RuleCondi
   });
 }
 
-function convertRuleActionsToInternal(actions: RuleAction[]): RuleAction[] {
+function transformRuleActionsAmount(
+  actions: RuleAction[],
+  transform: (amount: number) => number,
+): RuleAction[] {
   return actions.map((act) => {
     if (
       (act.op === 'set-split-amount' || (act.field === 'amount' && act.op === 'set')) &&
       typeof act.value === 'number'
     ) {
-      return { ...act, value: toMinorUnits(act.value) };
+      return { ...act, value: transform(act.value) };
     }
     return act;
   });
 }
 
-function convertRuleConditionsToExternal(conditions: RuleCondition[]): RuleCondition[] {
-  return conditions.map((cond) => {
-    if (cond.field === 'amount') {
-      if (typeof cond.value === 'number') {
-        return { ...cond, value: minorToDecimalAmount(cond.value) };
-      }
-      if (
-        typeof cond.value === 'object' &&
-        cond.value !== null &&
-        'num1' in cond.value &&
-        'num2' in cond.value &&
-        typeof (cond.value as { num1: unknown }).num1 === 'number' &&
-        typeof (cond.value as { num2: unknown }).num2 === 'number'
-      ) {
-        const val = cond.value as { num1: number; num2: number };
-        return {
-          ...cond,
-          value: {
-            num1: minorToDecimalAmount(val.num1),
-            num2: minorToDecimalAmount(val.num2),
-          },
-        };
-      }
-    }
-    return cond;
-  });
-}
+const convertRuleConditionsToInternal = (conditions: RuleCondition[]): RuleCondition[] =>
+  transformRuleConditionsAmount(conditions, toMinorUnits);
 
-function convertRuleActionsToExternal(actions: RuleAction[]): RuleAction[] {
-  return actions.map((act) => {
-    if (
-      (act.op === 'set-split-amount' || (act.field === 'amount' && act.op === 'set')) &&
-      typeof act.value === 'number'
-    ) {
-      return { ...act, value: minorToDecimalAmount(act.value) };
-    }
-    return act;
-  });
-}
+const convertRuleConditionsToExternal = (conditions: RuleCondition[]): RuleCondition[] =>
+  transformRuleConditionsAmount(conditions, minorToDecimalAmount);
+
+const convertRuleActionsToInternal = (actions: RuleAction[]): RuleAction[] =>
+  transformRuleActionsAmount(actions, toMinorUnits);
+
+const convertRuleActionsToExternal = (actions: RuleAction[]): RuleAction[] =>
+  transformRuleActionsAmount(actions, minorToDecimalAmount);
 
 function formatRuleSummary(rawRule: ActualRuleRecord): RuleSummary {
   const conditions = Array.isArray(rawRule.conditions)
@@ -503,7 +483,10 @@ function formatRuleSummary(rawRule: ActualRuleRecord): RuleSummary {
     ? convertRuleActionsToExternal(rawRule.actions)
     : [];
   const conditionsOp = rawRule.conditionsOp ?? rawRule.conditions_op ?? 'and';
-  const stage = rawRule.stage === 'default' ? null : (rawRule.stage ?? null);
+  const stage =
+    rawRule.stage === null || rawRule.stage === undefined || rawRule.stage === 'default'
+      ? 'default'
+      : rawRule.stage;
 
   return {
     id: rawRule.id,
@@ -1629,7 +1612,7 @@ export function createActualBudgetGateway(
           throw new Error('Either scheduleId or date must be provided');
         }
         const options: { start?: string; end?: string; count?: number } = {};
-        if (input.start) options.start = input.start;
+        options.start = input.start ?? new Date(now()).toISOString().slice(0, 10);
         if (input.end) options.end = input.end;
         if (input.count !== undefined) {
           options.count = input.count;

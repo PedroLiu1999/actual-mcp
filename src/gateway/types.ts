@@ -331,6 +331,7 @@ export interface ScheduleSummary {
   rule: string;
   next_date: string | null;
   completed: boolean;
+  status: 'completed' | 'active';
   posts_transaction: boolean;
   payee: string | null;
   account: string | null;

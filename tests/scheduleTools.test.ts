@@ -154,6 +154,7 @@ describe('Schedule MCP Tools HTTP Seam', () => {
         rule: 'rule-1',
         next_date: '2026-12-01',
         completed: false,
+        status: 'active' as const,
         posts_transaction: true,
         payee: 'payee-1',
         account: 'acct-1',
@@ -376,7 +377,31 @@ describe('Schedule ActualBudgetGateway Seam', () => {
     const schedules = await gateway.listSchedules();
     expect(schedules).toHaveLength(2);
     expect(schedules[0].amount).toBe(-1500.0);
+    expect(schedules[0].status).toBe('active');
     expect(schedules[1].amount).toEqual({ num1: -100.0, num2: -50.0 });
+  });
+
+  it('falls back to today when start is omitted in getScheduleDates', async () => {
+    const getScheduleDatesMock = vi.fn().mockResolvedValue(['2026-11-05']);
+    const mockApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      getScheduleDates: getScheduleDatesMock,
+      sync: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: mockApi,
+      now: () => new Date('2026-11-05T12:00:00Z').getTime(),
+    });
+
+    const dates = await gateway.getScheduleDates({ date: '2026-11-05' });
+    expect(dates).toEqual(['2026-11-05']);
+    expect(getScheduleDatesMock).toHaveBeenCalledWith('2026-11-05', {
+      start: '2026-11-05',
+      count: 10,
+    });
   });
 
   it('converts Decimal Amounts to minor units on createSchedule and updateSchedule', async () => {

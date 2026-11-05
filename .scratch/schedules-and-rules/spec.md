@@ -16,7 +16,7 @@ Extend `actual-mcp` to minor version `v0.3.0` with first-class **Schedules** and
    - `update_schedule`: Modify schedule parameters (amount, interval, name, payee, account, posts_transaction, resetNextDate).
    - `delete_schedule`: Delete a recurring schedule by ID (`destructiveHint: true`).
 2. **Rules Suite**:
-   - `list_rules`: List all configured automation rules (triggers, conditions, actions), with optional `payeeId` filter.
+   - `list_rules`: List all configured automation rules (stage, conditions, actions), with optional `payeeId` filter.
    - `create_rule`: Create a categorization or transaction mutation rule.
    - `update_rule`: Update conditions or actions of an existing rule.
    - `delete_rule`: Delete an automation rule by ID (`destructiveHint: true`).

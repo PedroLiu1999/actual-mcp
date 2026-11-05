@@ -1197,6 +1197,44 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
   );
 
   server.registerTool(
+    'run_bank_sync',
+    {
+      title: 'Run Bank Sync',
+      description:
+        'Trigger bank synchronization for a specific linked account or all linked accounts when accountId is omitted. Returns updated account IDs, new and matched transaction counts, and any sync errors.',
+      inputSchema: {
+        accountId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Optional account ID to synchronize. When omitted, synchronizes all linked accounts.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.runBankSync) {
+        throw new Error(
+          'runBankSync is not supported by the configured BudgetGateway',
+        );
+      }
+      const result = await budgetGateway.runBankSync(args.accountId);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
     'set_budget_carryover',
     {
       title: 'Set Budget Carryover',

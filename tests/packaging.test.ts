@@ -158,12 +158,12 @@ describe('Packaging & deployment artifacts', () => {
     expect(readme).toContain('PKCE');
   });
 
-  it('aligns version across package.json and src/mcp/server.ts to 0.4.0', () => {
+  it('aligns version across package.json and src/mcp/server.ts to 0.4.1', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
-    expect(pkg.version).toBe('0.4.0');
+    expect(pkg.version).toBe('0.4.1');
 
     const serverCode = fs.readFileSync(path.join(repoRoot, 'src/mcp/server.ts'), 'utf8');
-    expect(serverCode).toContain("version: '0.4.0'");
+    expect(serverCode).toContain("version: '0.4.1'");
   });
 
   it('defines a GitHub Actions CI pipeline (.github/workflows/ci.yml) with typecheck, test, and build across supported Node versions', () => {

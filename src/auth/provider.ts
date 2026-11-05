@@ -1,5 +1,6 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import {
+  InvalidClientMetadataError,
   InvalidGrantError,
   InvalidTokenError,
 } from '@modelcontextprotocol/sdk/server/auth/errors.js';
@@ -62,6 +63,17 @@ export function isAllowedRedirectUri(
             continue;
           }
         }
+        return true;
+      }
+
+      // Non-loopback prefix matching if allowed URI ends with '/' (e.g. https://oauth-redirect.googleusercontent.com/r/)
+      if (
+        !isLoopbackCandidate &&
+        parsedAllowed.protocol === parsed.protocol &&
+        parsedAllowed.hostname === parsed.hostname &&
+        allowed.endsWith('/') &&
+        redirectUri.startsWith(allowed)
+      ) {
         return true;
       }
     } catch {
@@ -163,15 +175,59 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
     this.tokenStore = new FileTokenStore(config.DATA_DIR);
     this.allowedRedirectUris = new Set<string>(config.OAUTH_ALLOWED_REDIRECT_URIS);
 
+    for (const client of this.tokenStore.getAllClients()) {
+      for (const uri of client.redirect_uris ?? []) {
+        this.allowedRedirectUris.add(uri);
+      }
+    }
+
     this.store = {
       getClient: (clientId: string) => {
         if (!clientId || clientId.trim() === '') {
           return undefined;
         }
+        const registered = this.tokenStore.getClient(clientId);
+        if (registered) {
+          return registered;
+        }
         return {
           client_id: clientId,
           redirect_uris: Array.from(this.allowedRedirectUris),
         };
+      },
+      registerClient: async (
+        client: Omit<OAuthClientInformationFull, 'client_id' | 'client_id_issued_at'> & {
+          client_id?: string;
+          client_id_issued_at?: number;
+        },
+      ) => {
+        const redirectUris = client.redirect_uris ?? [];
+        if (redirectUris.length === 0) {
+          throw new InvalidClientMetadataError(
+            'Client registration must include at least one redirect_uri',
+          );
+        }
+
+        for (const uri of redirectUris) {
+          if (!isAllowedRedirectUri(uri, this.config.OAUTH_ALLOWED_REDIRECT_URIS)) {
+            throw new InvalidClientMetadataError(
+              `Redirect URI not allowed by server allowlist policy: ${uri}`,
+            );
+          }
+          this.allowedRedirectUris.add(uri);
+        }
+
+        const clientId = client.client_id ?? randomUUID();
+        const registered: OAuthClientInformationFull = {
+          ...client,
+          client_id: clientId,
+          client_id_issued_at:
+            client.client_id_issued_at ?? Math.floor(Date.now() / 1000),
+          redirect_uris: redirectUris,
+        };
+
+        this.tokenStore.saveClient(registered);
+        return registered;
       },
     };
   }

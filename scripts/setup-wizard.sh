@@ -246,9 +246,8 @@ write_env DATA_DIR "/data"
 write_env SYNC_TTL_SECONDS "30"
 
 # ── Stage 2: OAuth 2.1 Public Client & Consent Passphrase ──────────────────
-stage "OAuth 2.1 Public Client & Admin Passphrase"
-say "actual-mcp uses OAuth 2.1 Public Client with PKCE."
-say "No Client ID or Client Secret is required in your AI clients!"
+stage "OAuth 2.1 & Admin Passphrase"
+say "actual-mcp uses OAuth 2.1 with PKCE and automatic client registration (/register)."
 say "When connecting, your browser will prompt for your Admin Passphrase on the consent page."
 printf '\n'
 
@@ -261,9 +260,9 @@ done
 write_env OAUTH_ADMIN_PASSWORD "$OAUTH_ADMIN_PASSWORD"
 
 printf '\n'
-say "Configure allowed OAuth redirect URIs (loopback ports are matched automatically)."
+say "Configure allowed OAuth redirect URIs (loopback ports and well-known callbacks pre-configured)."
 EXISTING_REDIRECTS=$(_existing "OAUTH_ALLOWED_REDIRECT_URIS" || true)
-DEFAULT_REDIRECTS="http://localhost,http://127.0.0.1"
+DEFAULT_REDIRECTS="http://localhost,http://127.0.0.1,https://oauth-redirect.googleusercontent.com/r/,https://oauth-redirect.googleusercontent.com/a/,https://vertexaisearch.cloud.google.com/oauth-redirect"
 ask OAUTH_ALLOWED_REDIRECT_URIS "Allowed Redirect URIs [${EXISTING_REDIRECTS:-$DEFAULT_REDIRECTS}]:"
 OAUTH_ALLOWED_REDIRECT_URIS="${OAUTH_ALLOWED_REDIRECT_URIS:-${EXISTING_REDIRECTS:-$DEFAULT_REDIRECTS}}"
 write_env OAUTH_ALLOWED_REDIRECT_URIS "$OAUTH_ALLOWED_REDIRECT_URIS"
@@ -361,8 +360,7 @@ step "Add the MCP server URL in your client configuration:"
 printf '\n'
 say "%s──────────────── Copy & Paste into Your Client ────────────────%s" "$BOLD" "$RESET"
 say "  %sMCP Server URL:%s    ${PUBLIC_URL}/mcp" "$BLUE" "$RESET"
-say "  %sAuthentication:%s    OAuth 2.1 (Public Client + PKCE)" "$BLUE" "$RESET"
-say "  %sClient ID / Secret:%s None required (zero config!)" "$GREEN" "$RESET"
+say "  %sAuthentication:%s    OAuth 2.1 (PKCE)" "$BLUE" "$RESET"
 say "%s────────────────────────────────────────────────────────────────%s" "$BOLD" "$RESET"
 printf '\n'
 step "When connecting, your browser will open: ${PUBLIC_URL}/authorize"

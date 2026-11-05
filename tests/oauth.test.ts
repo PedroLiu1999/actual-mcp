@@ -111,11 +111,12 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       authorization_endpoint: 'https://mcp.example.com/authorize',
       token_endpoint: 'https://mcp.example.com/token',
       revocation_endpoint: 'https://mcp.example.com/revoke',
+      registration_endpoint: 'https://mcp.example.com/register',
       response_types_supported: ['code'],
       grant_types_supported: expect.arrayContaining(['authorization_code', 'refresh_token']),
       code_challenge_methods_supported: ['S256'],
-      token_endpoint_auth_methods_supported: ['none'],
-      revocation_endpoint_auth_methods_supported: ['none'],
+      token_endpoint_auth_methods_supported: expect.arrayContaining(['none']),
+      revocation_endpoint_auth_methods_supported: expect.arrayContaining(['none']),
     });
   });
 
@@ -617,5 +618,108 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       });
     expect(badRefreshRes.status).toBe(400);
     expect(badRefreshRes.body.error).toBe('invalid_grant');
+  });
+
+  it('supports automatic dynamic client registration at POST /register and persists registered clients across restarts', async () => {
+    const app = createApp({ config, budgetGateway: createStubGateway() });
+
+    // 1. Register a public client (token_endpoint_auth_method: 'none')
+    const registerPublicRes = await request(app)
+      .post('/register')
+      .set('Host', 'mcp.example.com')
+      .set('Content-Type', 'application/json')
+      .send({
+        client_name: 'Claude Desktop Test',
+        redirect_uris: ['http://localhost:54321/callback'],
+        token_endpoint_auth_method: 'none',
+      });
+
+    expect(registerPublicRes.status).toBe(201);
+    expect(registerPublicRes.body.client_id).toEqual(expect.any(String));
+    expect(registerPublicRes.body.client_name).toBe('Claude Desktop Test');
+    expect(registerPublicRes.body.redirect_uris).toEqual(['http://localhost:54321/callback']);
+    expect(registerPublicRes.body.client_secret).toBeUndefined();
+
+    const publicClientId = registerPublicRes.body.client_id;
+
+    // 2. Reject registration with an unlisted redirect URI
+    const registerBadRes = await request(app)
+      .post('/register')
+      .set('Host', 'mcp.example.com')
+      .set('Content-Type', 'application/json')
+      .send({
+        client_name: 'Attacker Client',
+        redirect_uris: ['https://evil.com/callback'],
+        token_endpoint_auth_method: 'none',
+      });
+
+    expect(registerBadRes.status).toBe(400);
+    expect(registerBadRes.body.error).toBe('invalid_client_metadata');
+
+    // 3. Register client with well-known Google callback prefix
+    const registerGoogleRes = await request(app)
+      .post('/register')
+      .set('Host', 'mcp.example.com')
+      .set('Content-Type', 'application/json')
+      .send({
+        client_name: 'Gemini Connector',
+        redirect_uris: ['https://oauth-redirect.googleusercontent.com/r/my-project-123'],
+        token_endpoint_auth_method: 'none',
+      });
+
+    expect(registerGoogleRes.status).toBe(201);
+    expect(registerGoogleRes.body.redirect_uris).toEqual([
+      'https://oauth-redirect.googleusercontent.com/r/my-project-123',
+    ]);
+
+    // 4. Verify registered client is saved in oauth-tokens.json
+    const storePath = path.join(tempDataDir, 'oauth-tokens.json');
+    expect(fs.existsSync(storePath)).toBe(true);
+    const storeData = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+    expect(storeData.clients).toBeDefined();
+    expect(storeData.clients.some((c: { client_id: string }) => c.client_id === publicClientId)).toBe(true);
+
+    // 5. Restart server and verify authorization + token exchange with the registered client
+    const appRestarted = createApp({ config, budgetGateway: createStubGateway() });
+
+    const codeVerifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+    const codeChallenge = createHash('sha256')
+      .update(codeVerifier, 'utf8')
+      .digest('base64url');
+
+    const authRes = await request(appRestarted)
+      .post('/authorize')
+      .set('Host', 'mcp.example.com')
+      .type('form')
+      .send({
+        client_id: publicClientId,
+        redirect_uri: 'http://localhost:54321/callback',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        response_type: 'code',
+        state: 'xyz-registered',
+        passphrase: 'correct-horse-battery-staple',
+      });
+
+    expect(authRes.status).toBe(302);
+    const callbackUrl = new URL(authRes.headers.location);
+    const authCode = callbackUrl.searchParams.get('code');
+    expect(authCode).toBeTruthy();
+
+    const tokenRes = await request(appRestarted)
+      .post('/token')
+      .set('Host', 'mcp.example.com')
+      .type('form')
+      .send({
+        grant_type: 'authorization_code',
+        client_id: publicClientId,
+        code: authCode!,
+        code_verifier: codeVerifier,
+        redirect_uri: 'http://localhost:54321/callback',
+      });
+
+    expect(tokenRes.status).toBe(200);
+    expect(tokenRes.body.token_type).toBe('bearer');
+    expect(tokenRes.body.access_token).toEqual(expect.any(String));
   });
 });

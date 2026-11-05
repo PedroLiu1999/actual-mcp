@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { OAuthClientInformationFull } from '@modelcontextprotocol/sdk/shared/auth.js';
 
 export interface StoredToken {
   token: string;
@@ -16,6 +17,7 @@ export type StoredRefreshToken = StoredToken;
 interface TokenStoreData {
   accessTokens: StoredAccessToken[];
   refreshTokens: StoredRefreshToken[];
+  clients?: OAuthClientInformationFull[];
 }
 
 export const ACCESS_TOKEN_TTL_SECONDS = 3600;
@@ -81,6 +83,7 @@ export class FileTokenStore {
   private readonly dataDir: string;
   private readonly accessTokens = new Map<string, StoredAccessToken>();
   private readonly refreshTokens = new Map<string, StoredRefreshToken>();
+  private readonly clients = new Map<string, OAuthClientInformationFull>();
 
   constructor(dataDir: string) {
     this.dataDir = dataDir;
@@ -100,6 +103,14 @@ export class FileTokenStore {
 
       hydrateTokens(parsed.accessTokens, this.accessTokens, nowSeconds);
       hydrateTokens(parsed.refreshTokens, this.refreshTokens, nowSeconds);
+
+      if (Array.isArray(parsed.clients)) {
+        for (const client of parsed.clients) {
+          if (client && typeof client.client_id === 'string') {
+            this.clients.set(client.client_id, client);
+          }
+        }
+      }
     } catch {
       // Ignore corrupt or empty state file and start fresh
     }
@@ -114,11 +125,25 @@ export class FileTokenStore {
     const payload: TokenStoreData = {
       accessTokens: Array.from(this.accessTokens.values()),
       refreshTokens: Array.from(this.refreshTokens.values()),
+      clients: Array.from(this.clients.values()),
     };
 
     const tempPath = `${this.filePath}.${randomUUID()}.tmp`;
     fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2), 'utf8');
     fs.renameSync(tempPath, this.filePath);
+  }
+
+  saveClient(client: OAuthClientInformationFull): void {
+    this.clients.set(client.client_id, client);
+    this.persistToDisk();
+  }
+
+  getClient(clientId: string): OAuthClientInformationFull | undefined {
+    return this.clients.get(clientId);
+  }
+
+  getAllClients(): OAuthClientInformationFull[] {
+    return Array.from(this.clients.values());
   }
 
   saveTokens(access: StoredAccessToken, refresh?: StoredRefreshToken): void {

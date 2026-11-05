@@ -18,6 +18,14 @@ const redirectUriSchema = z.string().url().refine((val) => {
   message: 'Redirect URIs must use https:// unless targeting loopback (localhost or 127.0.0.1)',
 });
 
+export const DEFAULT_ALLOWED_REDIRECT_URIS = [
+  'http://localhost',
+  'http://127.0.0.1',
+  'https://oauth-redirect.googleusercontent.com/r/',
+  'https://oauth-redirect.googleusercontent.com/a/',
+  'https://vertexaisearch.cloud.google.com/oauth-redirect',
+];
+
 const configSchema = z.object({
   PUBLIC_URL: z
     .string()
@@ -34,9 +42,9 @@ const configSchema = z.object({
   OAUTH_ADMIN_PASSWORD: nonEmptyString,
   OAUTH_ALLOWED_REDIRECT_URIS: z
     .string()
-    .default('http://localhost,http://127.0.0.1')
+    .default(DEFAULT_ALLOWED_REDIRECT_URIS.join(','))
     .transform((raw) => {
-      if (!raw || raw.trim() === '') return ['http://localhost', 'http://127.0.0.1'];
+      if (!raw || raw.trim() === '') return DEFAULT_ALLOWED_REDIRECT_URIS;
       return raw
         .split(',')
         .map((s) => s.trim())

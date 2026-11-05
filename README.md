@@ -8,6 +8,11 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 
 ## Architecture
 
+![actual-mcp Architecture](docs/assets/architecture.svg)
+
+<details>
+<summary>ASCII Diagram Fallback</summary>
+
 ```text
 +------------------------+        HTTPS (Cloudflare Tunnel)        +---------------------------------------------------+
 |     Google Gemini      |  ------------------------------------>  |               actual-mcp (Docker)                 |
@@ -42,6 +47,8 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
                                                                    |            (actualbudget/actual-server)           |
                                                                    +---------------------------------------------------+
 ```
+
+</details>
 
 ### Key Design Highlights
 

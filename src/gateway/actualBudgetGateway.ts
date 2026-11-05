@@ -189,6 +189,10 @@ export interface ActualApiAdapter {
     fields: Record<string, unknown>,
   ): Promise<unknown>;
   deleteCategoryGroup?(id: string, transferCategoryId?: string): Promise<unknown>;
+  createPayee?(payee: { name: string }): Promise<string>;
+  updatePayee?(id: string, fields: Record<string, unknown>): Promise<unknown>;
+  deletePayee?(id: string): Promise<unknown>;
+  mergePayees?(targetId: string, mergeIds: string[]): Promise<unknown>;
   q?: typeof actualApi.q;
   aqlQuery?(query: ReturnType<typeof actualApi.q>): Promise<unknown>;
 }
@@ -232,6 +236,13 @@ export interface ActualBudgetGateway extends BudgetGateway {
   createCategoryGroup(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult>;
   updateCategoryGroup(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult>;
   deleteCategoryGroup(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult>;
+  createPayee(payee: { name: string }): Promise<{ id: string }>;
+  updatePayee(id: string, fields: { name?: string }): Promise<{ id: string }>;
+  deletePayee(id: string): Promise<{ id: string }>;
+  mergePayees(
+    targetId: string,
+    mergeIds: string[],
+  ): Promise<{ targetId: string; mergedCount: number }>;
   executeRead<T>(
     operation: (api: ActualApiAdapter) => Promise<T>,
     options?: { forceSync?: boolean },
@@ -259,6 +270,7 @@ export function createActualBudgetGateway(
   let shutdownPromise: Promise<void> | null = null;
   let queueTail: Promise<void> = Promise.resolve();
   let cachedCategories: CategoryGroupSummary[] | null = null;
+  let cachedPayees: PayeeSummary[] | null = null;
 
   function markSynced(): void {
     const currentMs = now();
@@ -284,6 +296,7 @@ export function createActualBudgetGateway(
       markSynced();
     }
     cachedCategories = null;
+    cachedPayees = null;
   }
 
   async function runInitialize(): Promise<void> {
@@ -354,6 +367,7 @@ export function createActualBudgetGateway(
       const result = await operation(api);
       await runSync();
       cachedCategories = null;
+      cachedPayees = null;
       return result;
     });
   }
@@ -372,6 +386,7 @@ export function createActualBudgetGateway(
         ready = false;
         initialized = false;
         cachedCategories = null;
+        cachedPayees = null;
         if (options.signalTarget?.off) {
           options.signalTarget.off('SIGTERM', handleSignal);
           options.signalTarget.off('SIGINT', handleSignal);
@@ -823,13 +838,19 @@ export function createActualBudgetGateway(
       }, readOptions);
     },
     async listPayees(readOptions?: { forceSync?: boolean }): Promise<PayeeSummary[]> {
+      if (!readOptions?.forceSync && cachedPayees !== null) {
+        return cachedPayees;
+      }
+
       return executeRead(async (apiAdapter) => {
         const rawPayees = (await apiAdapter.getPayees?.()) ?? [];
-        return rawPayees.map((payee) => ({
+        const result: PayeeSummary[] = rawPayees.map((payee) => ({
           id: payee.id,
           name: payee.name,
           transfer_acct: payee.transfer_acct ?? null,
         }));
+        cachedPayees = result;
+        return result;
       }, readOptions);
     },
     async listBudgetMonths(readOptions?: { forceSync?: boolean }): Promise<string[]> {
@@ -1116,6 +1137,52 @@ export function createActualBudgetGateway(
         await apiAdapter.deleteCategoryGroup(input.id, input.transferCategoryId);
         cachedCategories = null;
         return { id: input.id, success: true };
+      });
+    },
+    async createPayee(payee: { name: string }): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.createPayee) {
+          throw new Error('createPayee is not supported by the current API adapter');
+        }
+        const id = await apiAdapter.createPayee({ name: payee.name });
+        cachedPayees = null;
+        return { id };
+      });
+    },
+    async updatePayee(id: string, fields: { name?: string }): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.updatePayee) {
+          throw new Error('updatePayee is not supported by the current API adapter');
+        }
+        await apiAdapter.updatePayee(id, fields);
+        cachedPayees = null;
+        return { id };
+      });
+    },
+    async deletePayee(id: string): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.deletePayee) {
+          throw new Error('deletePayee is not supported by the current API adapter');
+        }
+        await apiAdapter.deletePayee(id);
+        cachedPayees = null;
+        return { id };
+      });
+    },
+    async mergePayees(
+      targetId: string,
+      mergeIds: string[],
+  ): Promise<{ targetId: string; mergedCount: number }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.mergePayees) {
+          throw new Error('mergePayees is not supported by the current API adapter');
+        }
+        if (!mergeIds || mergeIds.length === 0) {
+          throw new Error('mergePayees requires at least one source payee ID');
+        }
+        await apiAdapter.mergePayees(targetId, mergeIds);
+        cachedPayees = null;
+        return { targetId, mergedCount: mergeIds.length };
       });
     },
   };

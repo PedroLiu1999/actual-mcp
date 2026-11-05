@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,41 +12,7 @@ import {
   structuredAqlQueryInputSchema,
 } from '../src/gateway/aql.js';
 import { createActualBudgetGateway, type ActualBudgetGateway } from '../src/gateway/actualBudgetGateway.js';
-
-async function issueBearerToken(app: Express, config: AppConfig): Promise<string> {
-  const redirectUri = 'https://oauth-redirect.googleusercontent.com/r/aql-test';
-  const codeVerifier = 'aql-test-pkce-verifier-with-sufficient-entropy-0123456789';
-  const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
-
-  const authRes = await request(app)
-    .post('/authorize')
-    .set('Host', 'mcp.example.com')
-    .type('form')
-    .send({
-      response_type: 'code',
-      client_id: config.OAUTH_CLIENT_ID,
-      redirect_uri: redirectUri,
-      code_challenge: codeChallenge,
-      code_challenge_method: 'S256',
-      password: config.OAUTH_ADMIN_PASSWORD,
-    });
-
-  const code = new URL(authRes.headers.location).searchParams.get('code')!;
-  const tokenRes = await request(app)
-    .post('/token')
-    .set('Host', 'mcp.example.com')
-    .type('form')
-    .send({
-      grant_type: 'authorization_code',
-      client_id: config.OAUTH_CLIENT_ID,
-      client_secret: config.OAUTH_CLIENT_SECRET,
-      code,
-      code_verifier: codeVerifier,
-      redirect_uri: redirectUri,
-    });
-
-  return tokenRes.body.access_token as string;
-}
+import { issueBearerToken } from './helpers/auth.js';
 
 describe('BudgetGateway seam — get_spending_summary & run_aql_query against SQLite Target Budget', () => {
   let tmpDir: string;
@@ -426,15 +391,13 @@ describe('BudgetGateway seam — get_spending_summary & run_aql_query against SQ
       PUBLIC_URL: 'https://mcp.example.com',
       PORT: '3000',
       DATA_DIR: tmpDir,
-      OAUTH_CLIENT_ID: 'gemini-client',
-      OAUTH_CLIENT_SECRET: 'super-secret',
       OAUTH_ADMIN_PASSWORD: 'admin-password',
       ACTUAL_SERVER_URL: 'http://localhost:5006',
       ACTUAL_PASSWORD: 'actual-password',
       ACTUAL_SYNC_ID: '11111111-2222-3333-4444-555555555555',
     });
     const app = createApp({ config, budgetGateway: gateway });
-    const token = await issueBearerToken(app, config);
+    const token = await issueBearerToken(app, { adminPassword: config.OAUTH_ADMIN_PASSWORD });
 
     const res = await request(app)
       .post('/mcp')
@@ -473,15 +436,13 @@ describe('BudgetGateway seam — get_spending_summary & run_aql_query against SQ
       PUBLIC_URL: 'https://mcp.example.com',
       PORT: '3000',
       DATA_DIR: tmpDir,
-      OAUTH_CLIENT_ID: 'gemini-client',
-      OAUTH_CLIENT_SECRET: 'super-secret',
       OAUTH_ADMIN_PASSWORD: 'admin-password',
       ACTUAL_SERVER_URL: 'http://localhost:5006',
       ACTUAL_PASSWORD: 'actual-password',
       ACTUAL_SYNC_ID: '11111111-2222-3333-4444-555555555555',
     });
     const app = createApp({ config, budgetGateway: gateway });
-    const token = await issueBearerToken(app, config);
+    const token = await issueBearerToken(app, { adminPassword: config.OAUTH_ADMIN_PASSWORD });
 
     const summaryRes = await request(app)
       .post('/mcp')

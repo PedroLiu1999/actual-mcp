@@ -48,7 +48,7 @@ banner() {
   printf '%s  %s stages%s\n\n' "$DIM" "$TOTAL_STAGES" "$RESET"
   printf '%s  This wizard will guide you through configuring .env, testing your\n' "$DIM"
   printf '  connection to Actual Budget, deploying via Docker Compose, and\n'
-  printf '  connecting Google Gemini to your custom MCP endpoint.\n'
+  printf '  connecting your AI clients (Claude Desktop, Cursor, Gemini, etc.) to your custom MCP endpoint.\n'
   printf '  Stop any time with Ctrl-C and re-run later (remembers saved values).%s\n\n' "$RESET"
   pause "Ready to start?"
 }
@@ -193,7 +193,7 @@ finish() {
   say "2. Restart:      docker compose restart actual-mcp"
   say "3. Verify local: curl -fsS http://127.0.0.1:${PORT:-3000}/healthz"
   say "4. Verify public: curl -fsS ${PUBLIC_URL}/healthz"
-  say "5. Connect in Gemini: Settings > Connected Apps > Connect to an MCP server"
+  say "5. Connect AI client: Add MCP server URL ${PUBLIC_URL}/mcp"
   printf '\n'
 }
 
@@ -205,7 +205,7 @@ run_wizard() {
 
 TOTAL_STAGES=6
 
-banner "Actual MCP Setup & Gemini Deployment Wizard"
+banner "Actual MCP Setup & Deployment Wizard"
 
 # Ensure data directory and docker-compose.yml exist in current working directory
 mkdir -p data
@@ -245,41 +245,28 @@ write_env PORT "$PORT"
 write_env DATA_DIR "/data"
 write_env SYNC_TTL_SECONDS "30"
 
-# ── Stage 2: OAuth 2.1 Credentials & Consent Passphrase ────────────────────
-stage "OAuth 2.1 Credentials & Admin Passphrase"
-say "Google Gemini connects using an OAuth Client ID & Client Secret."
-say "When connecting, your browser will prompt for an Admin Passphrase on the consent page."
+# ── Stage 2: OAuth 2.1 Public Client & Consent Passphrase ──────────────────
+stage "OAuth 2.1 Public Client & Admin Passphrase"
+say "actual-mcp uses OAuth 2.1 Public Client with PKCE."
+say "No Client ID or Client Secret is required in your AI clients!"
+say "When connecting, your browser will prompt for your Admin Passphrase on the consent page."
 printf '\n'
 
-EXISTING_CLIENT_ID=$(_existing "OAUTH_CLIENT_ID" || true)
-if [[ -z "$EXISTING_CLIENT_ID" ]]; then
-  DEFAULT_CLIENT_ID="gemini-actual-$(openssl rand -hex 4 2>/dev/null || echo "client")"
-else
-  DEFAULT_CLIENT_ID="$EXISTING_CLIENT_ID"
-fi
-ask OAUTH_CLIENT_ID "OAuth Client ID [$DEFAULT_CLIENT_ID]:"
-OAUTH_CLIENT_ID="${OAUTH_CLIENT_ID:-$DEFAULT_CLIENT_ID}"
-write_env OAUTH_CLIENT_ID "$OAUTH_CLIENT_ID"
-
-EXISTING_SECRET=$(_existing "OAUTH_CLIENT_SECRET" || true)
-if [[ -z "$EXISTING_SECRET" ]]; then
-  DEFAULT_SECRET="$(openssl rand -hex 24 2>/dev/null || tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 32)"
-  step "Generated cryptographically random Client Secret."
-  ask OAUTH_CLIENT_SECRET "OAuth Client Secret [Enter to use generated secret]:"
-  OAUTH_CLIENT_SECRET="${OAUTH_CLIENT_SECRET:-$DEFAULT_SECRET}"
-else
-  ask_secret OAUTH_CLIENT_SECRET "OAuth Client Secret:"
-fi
-write_env OAUTH_CLIENT_SECRET "$OAUTH_CLIENT_SECRET"
-
-printf '\n'
-say "Choose an Admin Passphrase used to approve the OAuth connection on https://${PUBLIC_URL#https://}/authorize"
+say "Choose an Admin Passphrase used to approve OAuth connections on https://${PUBLIC_URL#https://}/authorize"
 ask_secret OAUTH_ADMIN_PASSWORD "Admin Consent Passphrase:"
 while [[ -z "$OAUTH_ADMIN_PASSWORD" ]]; do
   warn "Admin Passphrase cannot be empty."
   ask_secret OAUTH_ADMIN_PASSWORD "Admin Consent Passphrase:"
 done
 write_env OAUTH_ADMIN_PASSWORD "$OAUTH_ADMIN_PASSWORD"
+
+printf '\n'
+say "Configure allowed OAuth redirect URIs (loopback ports are matched automatically)."
+EXISTING_REDIRECTS=$(_existing "OAUTH_ALLOWED_REDIRECT_URIS" || true)
+DEFAULT_REDIRECTS="http://localhost,http://127.0.0.1"
+ask OAUTH_ALLOWED_REDIRECT_URIS "Allowed Redirect URIs [${EXISTING_REDIRECTS:-$DEFAULT_REDIRECTS}]:"
+OAUTH_ALLOWED_REDIRECT_URIS="${OAUTH_ALLOWED_REDIRECT_URIS:-${EXISTING_REDIRECTS:-$DEFAULT_REDIRECTS}}"
+write_env OAUTH_ALLOWED_REDIRECT_URIS "$OAUTH_ALLOWED_REDIRECT_URIS"
 
 # ── Stage 3: Actual Budget Sync Server ─────────────────────────────────────
 stage "Actual Budget Sync Server Connection"
@@ -365,27 +352,24 @@ if curl -fsS "${PUBLIC_URL}/healthz" >/dev/null 2>&1; then
 else
   warn "Public URL ${PUBLIC_URL}/healthz not reachable yet. Check your Cloudflare Tunnel route."
 fi
-pause "Press Enter to continue to Gemini connection details"
+pause "Press Enter to continue to AI client connection details"
 
-# ── Stage 6: Google Gemini Custom Connector Details ────────────────────────
-stage "Connect to Google Gemini"
-say "Open Google Gemini to connect your new MCP server:"
-step "In Gemini, click Settings > Connected Apps (or https://gemini.google.com/devmode)"
-step "Click 'Connect to an MCP server' (as shown in your screenshot)."
+# ── Stage 6: Connect your AI Client ────────────────────────────────────────
+stage "Connect your AI Client"
+say "Connect your MCP server in Claude Desktop, Cursor, Gemini, or any MCP client:"
+step "Add the MCP server URL in your client configuration:"
 printf '\n'
-say "%s──────────────── Copy & Paste into Gemini Modal ────────────────%s" "$BOLD" "$RESET"
-say "  %sMCP server URL:%s  ${PUBLIC_URL}/mcp" "$BLUE" "$RESET"
-say "  Click 'Additional settings / Show more':"
-say "  %sClient ID:%s       ${OAUTH_CLIENT_ID}" "$BLUE" "$RESET"
-say "  %sClient secret:%s   ${OAUTH_CLIENT_SECRET}" "$BLUE" "$RESET"
+say "%s──────────────── Copy & Paste into Your Client ────────────────%s" "$BOLD" "$RESET"
+say "  %sMCP Server URL:%s    ${PUBLIC_URL}/mcp" "$BLUE" "$RESET"
+say "  %sAuthentication:%s    OAuth 2.1 (Public Client + PKCE)" "$BLUE" "$RESET"
+say "  %sClient ID / Secret:%s None required (zero config!)" "$GREEN" "$RESET"
 say "%s────────────────────────────────────────────────────────────────%s" "$BOLD" "$RESET"
 printf '\n'
-step "Click 'Next' in Gemini."
-step "Your browser will redirect to ${PUBLIC_URL}/authorize"
+step "When connecting, your browser will open: ${PUBLIC_URL}/authorize"
 step "Enter your Admin Consent Passphrase to approve the link."
-step "Gemini will redirect back and complete the connection!"
+step "Your client will complete the connection automatically!"
 printf '\n'
-pause "Press Enter once you have connected in Gemini"
+pause "Press Enter once you have connected your client"
 
 finish
 }

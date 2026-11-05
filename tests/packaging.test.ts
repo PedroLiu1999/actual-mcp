@@ -43,7 +43,7 @@ describe('Packaging & deployment artifacts', () => {
 
     // Ensure optional variables are also documented in .env.example
     expect(raw).toContain('ACTUAL_ENCRYPTION_PASSWORD');
-    expect(raw).toContain('OAUTH_EXTRA_REDIRECT_URIS');
+    expect(raw).toContain('OAUTH_ALLOWED_REDIRECT_URIS');
     expect(raw).toContain('SYNC_TTL_SECONDS');
   });
 
@@ -140,10 +140,8 @@ describe('Packaging & deployment artifacts', () => {
       'PUBLIC_URL',
       'PORT',
       'DATA_DIR',
-      'OAUTH_CLIENT_ID',
-      'OAUTH_CLIENT_SECRET',
       'OAUTH_ADMIN_PASSWORD',
-      'OAUTH_EXTRA_REDIRECT_URIS',
+      'OAUTH_ALLOWED_REDIRECT_URIS',
       'ACTUAL_SERVER_URL',
       'ACTUAL_PASSWORD',
       'ACTUAL_SYNC_ID',
@@ -156,9 +154,8 @@ describe('Packaging & deployment artifacts', () => {
 
     expect(readme).toContain('cloudflared');
     expect(readme).toContain('actual-server');
-    expect(readme).toContain('Connect to an MCP server');
-    expect(readme).toContain('Client ID');
-    expect(readme).toContain('Client Secret');
+    expect(readme).toContain('OAuth 2.1');
+    expect(readme).toContain('PKCE');
   });
 
   it('aligns version across package.json and src/mcp/server.ts to 0.3.0', () => {

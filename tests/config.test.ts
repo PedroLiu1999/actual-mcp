@@ -5,8 +5,6 @@ const validEnv = {
   PUBLIC_URL: 'https://mcp.example.com',
   PORT: '3000',
   DATA_DIR: '/tmp/actual-mcp-data',
-  OAUTH_CLIENT_ID: 'gemini-client',
-  OAUTH_CLIENT_SECRET: 'super-secret-client-secret',
   OAUTH_ADMIN_PASSWORD: 'admin-consent-passphrase',
   ACTUAL_SERVER_URL: 'http://host.docker.internal:5006',
   ACTUAL_PASSWORD: 'actual-server-password',
@@ -21,10 +19,8 @@ describe('loadConfig', () => {
       PUBLIC_URL: 'https://mcp.example.com',
       PORT: 3000,
       DATA_DIR: '/tmp/actual-mcp-data',
-      OAUTH_CLIENT_ID: 'gemini-client',
-      OAUTH_CLIENT_SECRET: 'super-secret-client-secret',
       OAUTH_ADMIN_PASSWORD: 'admin-consent-passphrase',
-      OAUTH_EXTRA_REDIRECT_URIS: [],
+      OAUTH_ALLOWED_REDIRECT_URIS: ['http://localhost', 'http://127.0.0.1'],
       ACTUAL_SERVER_URL: 'http://host.docker.internal:5006',
       ACTUAL_PASSWORD: 'actual-server-password',
       ACTUAL_SYNC_ID: '11111111-2222-3333-4444-555555555555',
@@ -33,20 +29,29 @@ describe('loadConfig', () => {
     });
   });
 
-  it('parses optional ACTUAL_ENCRYPTION_PASSWORD, SYNC_TTL_SECONDS, and OAUTH_EXTRA_REDIRECT_URIS', () => {
+  it('parses optional ACTUAL_ENCRYPTION_PASSWORD, SYNC_TTL_SECONDS, and OAUTH_ALLOWED_REDIRECT_URIS', () => {
     const config = loadConfig({
       ...validEnv,
       ACTUAL_ENCRYPTION_PASSWORD: 'e2e-password',
       SYNC_TTL_SECONDS: '60',
-      OAUTH_EXTRA_REDIRECT_URIS: 'https://cb1.example.com/oauth, https://cb2.example.com/oauth',
+      OAUTH_ALLOWED_REDIRECT_URIS: 'https://cb1.example.com/oauth, https://cb2.example.com/oauth',
     });
 
     expect(config.ACTUAL_ENCRYPTION_PASSWORD).toBe('e2e-password');
     expect(config.SYNC_TTL_SECONDS).toBe(60);
-    expect(config.OAUTH_EXTRA_REDIRECT_URIS).toEqual([
+    expect(config.OAUTH_ALLOWED_REDIRECT_URIS).toEqual([
       'https://cb1.example.com/oauth',
       'https://cb2.example.com/oauth',
     ]);
+  });
+
+  it('rejects non-HTTPS remote redirect URIs in OAUTH_ALLOWED_REDIRECT_URIS', () => {
+    expect(() =>
+      loadConfig({
+        ...validEnv,
+        OAUTH_ALLOWED_REDIRECT_URIS: 'http://example.com/oauth',
+      }),
+    ).toThrow(/Invalid startup configuration.*OAUTH_ALLOWED_REDIRECT_URIS/s);
   });
 
   it('fails fast with a descriptive error when required environment variables are missing or invalid', () => {

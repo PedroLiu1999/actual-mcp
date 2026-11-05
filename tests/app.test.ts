@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig, type AppConfig } from '../src/config.js';
 import type { AccountSummary, BudgetGateway, BudgetReadiness } from '../src/gateway/types.js';
+import { issueBearerToken } from './helpers/auth.js';
 
 function createStubGateway(overrides: {
   readiness?: Partial<BudgetReadiness>;
@@ -51,8 +51,6 @@ beforeEach(() => {
     PUBLIC_URL: 'https://mcp.example.com',
     PORT: '3000',
     DATA_DIR: tempDataDir,
-    OAUTH_CLIENT_ID: 'gemini-client',
-    OAUTH_CLIENT_SECRET: 'super-secret',
     OAUTH_ADMIN_PASSWORD: 'admin-password',
     ACTUAL_SERVER_URL: 'http://localhost:5006',
     ACTUAL_PASSWORD: 'actual-password',
@@ -63,41 +61,6 @@ beforeEach(() => {
 afterEach(() => {
   fs.rmSync(tempDataDir, { recursive: true, force: true });
 });
-
-async function issueBearerToken(app: Express): Promise<string> {
-  const redirectUri = 'https://oauth-redirect.googleusercontent.com/r/app-test';
-  const codeVerifier = 'app-test-pkce-verifier-with-sufficient-entropy-0123456789';
-  const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
-
-  const authRes = await request(app)
-    .post('/authorize')
-    .set('Host', 'mcp.example.com')
-    .type('form')
-    .send({
-      response_type: 'code',
-      client_id: testConfig.OAUTH_CLIENT_ID,
-      redirect_uri: redirectUri,
-      code_challenge: codeChallenge,
-      code_challenge_method: 'S256',
-      password: testConfig.OAUTH_ADMIN_PASSWORD,
-    });
-
-  const code = new URL(authRes.headers.location).searchParams.get('code')!;
-  const tokenRes = await request(app)
-    .post('/token')
-    .set('Host', 'mcp.example.com')
-    .type('form')
-    .send({
-      grant_type: 'authorization_code',
-      client_id: testConfig.OAUTH_CLIENT_ID,
-      client_secret: testConfig.OAUTH_CLIENT_SECRET,
-      code,
-      code_verifier: codeVerifier,
-      redirect_uri: redirectUri,
-    });
-
-  return tokenRes.body.access_token as string;
-}
 
 describe('HTTP application seam — healthz & host validation', () => {
   it('enables reverse proxy trust (trust proxy: 1)', () => {

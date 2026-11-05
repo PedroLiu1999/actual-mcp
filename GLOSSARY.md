@@ -75,7 +75,7 @@ _Avoid_: Trigger, automation script, webhook
 ### Access & Transport
 
 **Embedded OAuth Server**:
-The built-in single-tenant OAuth 2.1 Authorization and Resource Server running inside `actual-mcp` that authenticates the Gemini Connector using a pre-configured Client ID, Client Secret, and consent passphrase.
+The built-in single-tenant OAuth 2.1 Authorization and Resource Server running inside `actual-mcp` that authenticates MCP clients via PKCE, dynamic client IDs, an explicit redirect URI allowlist, and an admin consent passphrase.
 _Avoid_: External IdP, OAuth proxy
 
 **Token Store**:

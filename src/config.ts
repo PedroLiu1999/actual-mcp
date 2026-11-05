@@ -2,6 +2,22 @@ import { z } from 'zod';
 
 const nonEmptyString = z.string().trim().min(1);
 
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1']);
+
+const redirectUriSchema = z.string().url().refine((val) => {
+  try {
+    const url = new URL(val);
+    if (LOOPBACK_HOSTS.has(url.hostname)) {
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    }
+    return url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}, {
+  message: 'Redirect URIs must use https:// unless targeting loopback (localhost or 127.0.0.1)',
+});
+
 const configSchema = z.object({
   PUBLIC_URL: z
     .string()
@@ -15,20 +31,19 @@ const configSchema = z.object({
     .optional(),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   DATA_DIR: nonEmptyString,
-  OAUTH_CLIENT_ID: nonEmptyString,
-  OAUTH_CLIENT_SECRET: nonEmptyString,
   OAUTH_ADMIN_PASSWORD: nonEmptyString,
-  OAUTH_EXTRA_REDIRECT_URIS: z
+  OAUTH_ALLOWED_REDIRECT_URIS: z
     .string()
     .optional()
     .transform((raw) => {
-      if (!raw || raw.trim() === '') return [];
+      if (!raw || raw.trim() === '') return ['http://localhost', 'http://127.0.0.1'];
       return raw
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
     })
-    .pipe(z.array(z.string().url())),
+    .default('http://localhost,http://127.0.0.1')
+    .pipe(z.array(redirectUriSchema)),
   ACTUAL_SERVER_URL: z
     .string()
     .trim()

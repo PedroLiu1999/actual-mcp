@@ -16,7 +16,7 @@
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-Streamable%20HTTP-blueviolet.svg" alt="Model Context Protocol"></a>
 </p>
 
-A self-contained Model Context Protocol (MCP) server that connects a self-hosted [Actual Budget](https://actualbudget.org/) instance to **Google Gemini** over **Streamable HTTP** (`POST /mcp`) and an **Embedded OAuth Server** (OAuth 2.1 Authorization Code + PKCE).
+A self-contained Model Context Protocol (MCP) server that connects a self-hosted [Actual Budget](https://actualbudget.org/) instance to **AI assistants (Claude Desktop, Cursor, Google Gemini, and custom agents)** over **Streamable HTTP** (`POST /mcp`) and an **Embedded OAuth Server** (OAuth 2.1 Public Client + PKCE).
 
 Designed for single-user VPS deployments where `actual-server` and `cloudflared` (Cloudflare Tunnel) are already running, `actual-mcp` packages the `@actual-app/api` (`loot-core`) Node.js engine, a persistent local SQLite **Budget Cache**, and a zero-dependency **Embedded OAuth Server** into a single lightweight Docker container.
 
@@ -31,11 +31,12 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 
 ```text
 +------------------------+        HTTPS (Cloudflare Tunnel)        +---------------------------------------------------+
-|     Google Gemini      |  ------------------------------------>  |               actual-mcp (Docker)                 |
-|  Custom MCP Connector  |     POST /mcp (Bearer Access Token)     |                                                   |
+|  AI Assistant / Client |  ------------------------------------>  |               actual-mcp (Docker)                 |
+| (Claude, Cursor, etc.) |     POST /mcp (Bearer Access Token)     |                                                   |
 |                        |     GET  /.well-known/oauth-*           |  +---------------------------------------------+  |
 |                        |     GET/POST /authorize, POST /token    |  | Embedded OAuth Server (OAuth 2.1 + PKCE)    |  |
-+------------------------+                                         |  | - Pre-registered Client ID & Client Secret  |  |
++------------------------+                                         |  | - Public Client (no client secrets needed)  |  |
+                                                                   |  | - Dynamic client_id acceptance              |  |
                                                                    |  | - Passphrase-protected HTML consent screen  |  |
                                                                    |  | - Persistent Token Store (oauth-tokens.json)|  |
                                                                    |  +---------------------------------------------+  |
@@ -68,12 +69,13 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 
 ### Key Design Highlights
 
-1. **Embedded Single-Tenant OAuth 2.1 Server ([ADR-0001](docs/adr/0001-embedded-single-tenant-oauth.md))**:
+1. **Embedded Single-Tenant OAuth 2.1 Server ([ADR-0006](docs/adr/0006-public-client-pkce-oauth.md))**:
    - Exposes RFC 9728 Protected Resource Metadata (`/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp`) and RFC 8414 Authorization Server Metadata (`/.well-known/oauth-authorization-server`).
-   - Supports both `client_secret_basic` (`Authorization: Basic`) and `client_secret_post` client authentication on `/token` and `/revoke`.
-   - Automatically allowlists Google Gemini's dynamic OAuth callback URLs (`https://oauth-redirect*.googleusercontent.com/(r|a)/*` and `https://vertexaisearch.cloud.google.com/oauth-redirect`).
+   - Zero client credentials required: implements OAuth 2.1 Public Client (`token_endpoint_auth_methods_supported: ['none']`) with PKCE (`S256`).
+   - Dynamically accepts any incoming `client_id` without requiring an RFC 7591 registration endpoint.
+   - Enforces an explicit redirect URI allowlist in `.env` (`OAUTH_ALLOWED_REDIRECT_URIS`), supporting loopback port relaxation for `localhost` and `127.0.0.1` per RFC 8252 §7.3 while enforcing exact matching on remote HTTPS URIs.
    - Renders a self-contained, rate-limited HTML consent screen at `GET /authorize` gated by `OAUTH_ADMIN_PASSWORD`.
-   - Implements **Persistent Linking** via a file-backed **Token Store** (`/data/oauth-tokens.json`): `grant_type=refresh_token` returns a fresh access token while preserving the exact same refresh token and extending its sliding 365-day expiration so your Gemini link survives token refreshes and container restarts.
+   - Implements **Persistent Linking** via a file-backed **Token Store** (`/data/oauth-tokens.json`): `grant_type=refresh_token` returns a fresh access token while preserving the exact same refresh token and extending its sliding 365-day expiration so your AI link survives token refreshes and container restarts.
 2. **Single-Budget FIFO Mutex & Coalesced Sync ([ADR-0002](docs/adr/0002-single-budget-mutex-and-cache.md))**:
    - `@actual-app/api` embeds `loot-core` and a module-level `better-sqlite3` singleton. `actual-mcp` binds to a single **Target Budget** (`ACTUAL_SYNC_ID`), caches its SQLite database in `/data/budget-cache`, and serializes every API operation through a process-wide non-reentrant FIFO mutex.
    - **Coalesced Sync**: Read operations skip `api.sync()` if the **Budget Cache** was synced within `SYNC_TTL_SECONDS` (default `30` seconds, overrideable per call with `forceSync: true`). Write operations always `sync()` before mutating and `sync()` immediately after mutating so changes reach the **Sync Server** before the tool returns.
@@ -186,11 +188,11 @@ mkdir -p actual-mcp && cd actual-mcp && bash -c "$(curl -fsSL https://raw.github
 The interactive wizard handles everything end-to-end:
 1. **Auto-Downloads `docker-compose.yml`**: Fetches the compose file and creates the persistent `data/` directory.
 2. **Configures `.env`**: Sets up `PUBLIC_URL` (for your Cloudflare Tunnel) and loopback `PORT` (default `3000`).
-3. **OAuth Credentials**: Generates a random `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET`, and prompts for an `OAUTH_ADMIN_PASSWORD`.
+3. **OAuth Configuration**: Prompts for `OAUTH_ADMIN_PASSWORD` (Admin Consent Passphrase) and configures allowed redirect URIs.
 4. **Actual Budget Connection**: Prompts for `ACTUAL_SERVER_URL`, server password, and `ACTUAL_SYNC_ID`.
 5. **Starts Docker Container**: Offers to pull the pre-built image from GHCR and start it (`docker compose pull && docker compose up -d`).
 6. **Healthchecks**: Tests local and public `/healthz` endpoints.
-7. **Gemini Custom Connector**: Displays the exact `MCP server URL`, `Client ID`, and `Client secret` to paste into Google Gemini.
+7. **Connect AI Client**: Displays the exact `MCP server URL` (`${PUBLIC_URL}/mcp`) to paste into your AI assistant.
 
 ---
 
@@ -204,10 +206,8 @@ Copy `.env.example` to `.env` (or run `./scripts/setup-wizard.sh`):
 | `PORT` | No | `3000` | Port the HTTP server listens on inside the container (and host loopback port in `docker-compose.yml`). |
 | `ACTUAL_MCP_VERSION` | No | `latest` | Tag of the pre-built Docker image from GitHub Container Registry (`ghcr.io/pedroliu1999/actual-mcp`). |
 | `DATA_DIR` | **Yes** | `/data` | Path to the persistent directory storing `oauth-tokens.json` (**Token Store**) and `budget-cache/` (**Budget Cache**). |
-| `OAUTH_CLIENT_ID` | **Yes** | — | Pre-registered OAuth 2.1 `Client ID` to enter in Google Gemini. |
-| `OAUTH_CLIENT_SECRET` | **Yes** | — | Pre-registered OAuth 2.1 `Client Secret` to enter in Google Gemini (e.g. `openssl rand -hex 32`). |
 | `OAUTH_ADMIN_PASSWORD` | **Yes** | — | Admin passphrase required on the HTML consent page (`GET /authorize`) to approve an OAuth grant. |
-| `OAUTH_EXTRA_REDIRECT_URIS` | No | `""` | Optional comma-separated list of additional allowed redirect URIs beyond Google Gemini's built-in callback patterns. |
+| `OAUTH_ALLOWED_REDIRECT_URIS` | No | `http://localhost,http://127.0.0.1` | Comma-separated list of allowed OAuth redirect URIs. Loopback ports match automatically per RFC 8252. |
 | `ACTUAL_SERVER_URL` | **Yes** | — | URL of your self-hosted Actual Budget **Sync Server** (e.g. `http://host.docker.internal:5006`). |
 | `ACTUAL_PASSWORD` | **Yes** | — | Server password used to sign in to your Actual Budget **Sync Server**. |
 | `ACTUAL_SYNC_ID` | **Yes** | — | **Sync ID** UUID of the **Target Budget** (found in Actual Budget under *Settings → Show advanced settings → Sync ID*). |
@@ -242,12 +242,7 @@ Or configure it manually by copying `.env.example`:
 cp .env.example .env
 ```
 
-Generate strong secrets for `OAUTH_CLIENT_SECRET` and `OAUTH_ADMIN_PASSWORD`, and fill in your `.env`:
-
-```bash
-# Example secret generation:
-openssl rand -hex 32
-```
+Set `OAUTH_ADMIN_PASSWORD` to a strong passphrase, and fill in your `.env`:
 
 - Set `PUBLIC_URL=https://actual-mcp.yourdomain.com` (matching the hostname you will route in `cloudflared`).
 - Set `ACTUAL_SERVER_URL`:
@@ -332,21 +327,17 @@ curl -s https://actual-mcp.yourdomain.com/.well-known/oauth-authorization-server
 
 ---
 
-## Connecting in Google Gemini
+## Connecting in AI Assistants (Claude Desktop, Cursor, Gemini)
 
 Once `https://actual-mcp.yourdomain.com` is live behind your Cloudflare Tunnel:
 
-1. Open [Google Gemini](https://gemini.google.com) (or [Gemini Apps Developer Mode](https://gemini.google.com/devmode)).
-2. Go to **Settings** → **Connected Apps** → **Add a custom app** (or click **+ Create new** to open the **"Connect to an MCP server"** dialog).
-3. Fill in the connection details:
+1. In your AI client (e.g. Claude Desktop, Cursor, or Gemini), add the MCP server URL:
    - **MCP server URL**: `https://actual-mcp.yourdomain.com/mcp`
-4. Expand **Additional settings** → **Show more** (or **Advanced features** → **Show more**) to reveal static OAuth client credentials:
-   - **Client ID** (OAuth Client ID): Enter the exact `OAUTH_CLIENT_ID` from your `.env` (e.g. `actual-mcp-gemini`).
-   - **Client Secret** (OAuth Client secret): Enter the exact `OAUTH_CLIENT_SECRET` from your `.env`.
-5. Click **Connect** / **Save**:
-   - Gemini discovers `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server` and opens a browser popup to `https://actual-mcp.yourdomain.com/authorize`.
-   - On the **Actual Budget MCP Server** consent screen, enter your `OAUTH_ADMIN_PASSWORD` and click **Approve & Connect**.
-6. Gemini exchanges the authorization code (with PKCE `S256`) at `POST /token` and stores your non-rotating refresh token. Your Actual Budget tools are now available in Gemini web and mobile chats!
+2. **Zero Credentials Required**: Because `actual-mcp` implements OAuth 2.1 Public Client with PKCE, you do not need to configure or copy-paste any `Client ID` or `Client Secret`.
+3. **Approval**:
+   - The client discovers OAuth metadata and opens a browser window to `https://actual-mcp.yourdomain.com/authorize`.
+   - On the **Authorize Actual Budget MCP** consent screen, enter your `OAUTH_ADMIN_PASSWORD` and click **Approve Access**.
+4. The client exchanges the authorization code with PKCE (`S256`) and receives persistent tokens. Your Actual Budget tools are now ready to use!
 
 ---
 

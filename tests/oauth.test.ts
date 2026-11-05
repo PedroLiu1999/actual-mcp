@@ -37,8 +37,6 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       PUBLIC_URL: 'https://mcp.example.com',
       PORT: '3000',
       DATA_DIR: tempDataDir,
-      OAUTH_CLIENT_ID: 'gemini-client',
-      OAUTH_CLIENT_SECRET: 'super-secret-value',
       OAUTH_ADMIN_PASSWORD: 'correct-horse-battery-staple',
       ACTUAL_SERVER_URL: 'http://localhost:5006',
       ACTUAL_PASSWORD: 'actual-password',
@@ -99,7 +97,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     expect(rootRes.body).toEqual(pathRes.body);
   });
 
-  it('serves RFC 8414 Authorization Server Metadata at /.well-known/oauth-authorization-server advertising /authorize, /token, /revoke, S256, and both client_secret_post and client_secret_basic', async () => {
+  it('serves RFC 8414 Authorization Server Metadata at /.well-known/oauth-authorization-server advertising /authorize, /token, /revoke, S256, and auth method none', async () => {
     const app = createApp({ config, budgetGateway: createStubGateway() });
 
     const res = await request(app)
@@ -116,14 +114,8 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       response_types_supported: ['code'],
       grant_types_supported: expect.arrayContaining(['authorization_code', 'refresh_token']),
       code_challenge_methods_supported: ['S256'],
-      token_endpoint_auth_methods_supported: expect.arrayContaining([
-        'client_secret_post',
-        'client_secret_basic',
-      ]),
-      revocation_endpoint_auth_methods_supported: expect.arrayContaining([
-        'client_secret_post',
-        'client_secret_basic',
-      ]),
+      token_endpoint_auth_methods_supported: ['none'],
+      revocation_endpoint_auth_methods_supported: ['none'],
     });
   });
 
@@ -133,8 +125,6 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       LOGO_URL: 'https://lh3.googleusercontent.com/d/abc-123',
       PORT: '3000',
       DATA_DIR: tempDataDir,
-      OAUTH_CLIENT_ID: 'gemini-client',
-      OAUTH_CLIENT_SECRET: 'super-secret-value',
       OAUTH_ADMIN_PASSWORD: 'correct-horse-battery-staple',
       ACTUAL_SERVER_URL: 'http://localhost:5006',
       ACTUAL_PASSWORD: 'actual-password',
@@ -150,15 +140,14 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     expect(res.body.logo_uri).toBe('https://lh3.googleusercontent.com/d/abc-123');
   });
 
-  it('validates client_id and allows Google connector redirect URI patterns plus OAUTH_EXTRA_REDIRECT_URIS on GET /authorize while rejecting unlisted redirect URIs', async () => {
+  it('accepts dynamic client_id and allows loopback ports plus OAUTH_ALLOWED_REDIRECT_URIS on GET /authorize while rejecting unlisted redirect URIs', async () => {
     const customConfig = loadConfig({
       PUBLIC_URL: 'https://mcp.example.com',
       PORT: '3000',
       DATA_DIR: tempDataDir,
-      OAUTH_CLIENT_ID: 'gemini-client',
-      OAUTH_CLIENT_SECRET: 'super-secret-value',
       OAUTH_ADMIN_PASSWORD: 'correct-horse-battery-staple',
-      OAUTH_EXTRA_REDIRECT_URIS: 'https://custom-client.example.org/oauth/callback',
+      OAUTH_ALLOWED_REDIRECT_URIS:
+        'http://localhost,http://127.0.0.1,https://custom-client.example.org/oauth/callback',
       ACTUAL_SERVER_URL: 'http://localhost:5006',
       ACTUAL_PASSWORD: 'actual-password',
       ACTUAL_SYNC_ID: '11111111-2222-3333-4444-555555555555',
@@ -166,13 +155,10 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     const app = createApp({ config: customConfig, budgetGateway: createStubGateway() });
 
     const allowedRedirectUris = [
-      'https://oauth-redirect.googleusercontent.com/r/gemini-prod-123',
-      'https://oauth-redirect-sandbox.googleusercontent.com/r/gemini-sbx-456',
-      'https://oauth-redirect-test.googleusercontent.com/r/gemini-test-789',
-      'https://oauth-redirect.googleusercontent.com/a/agent-prod-123',
-      'https://oauth-redirect-sandbox.googleusercontent.com/a/agent-sbx-456',
-      'https://oauth-redirect-test.googleusercontent.com/a/agent-test-789',
-      'https://vertexaisearch.cloud.google.com/oauth-redirect',
+      'http://localhost:54321/callback',
+      'http://localhost:8080/oauth2callback',
+      'http://127.0.0.1:49152/callback',
+      'http://127.0.0.1:3000/',
       'https://custom-client.example.org/oauth/callback',
     ];
 
@@ -182,7 +168,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
         .set('Host', 'mcp.example.com')
         .query({
           response_type: 'code',
-          client_id: 'gemini-client',
+          client_id: 'any-dynamic-client-id',
           redirect_uri: redirectUri,
           code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
           code_challenge_method: 'S256',
@@ -192,18 +178,16 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
 
       expect(res.status, `Expected 200 for allowed redirect_uri ${redirectUri}`).toBe(200);
       expect(res.headers['content-type']).toMatch(/text\/html/);
-      expect(res.text).toContain('gemini-client');
+      expect(res.text).toContain('any-dynamic-client-id');
       expect(res.text).toContain('/logo.png');
       expect(res.text).toMatch(/type="password"/);
     }
 
     const rejectedRedirectUris = [
       'https://evil.example.com/callback',
-      'http://oauth-redirect.googleusercontent.com/r/insecure',
-      'https://oauth-redirect.googleusercontent.com/other/path',
-      'https://oauth-redirect.googleusercontent.com/r/',
-      'https://oauth-redirect.googleusercontent.com.evil.com/r/123',
-      'https://vertexaisearch.cloud.google.com/oauth-redirect/extra',
+      'https://oauth-redirect.googleusercontent.com/r/gemini-prod-123',
+      'http://attacker.com/callback',
+      'https://custom-client.example.org/other/path',
     ];
 
     for (const badUri of rejectedRedirectUris) {
@@ -212,7 +196,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
         .set('Host', 'mcp.example.com')
         .query({
           response_type: 'code',
-          client_id: 'gemini-client',
+          client_id: 'any-client',
           redirect_uri: badUri,
           code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
           code_challenge_method: 'S256',
@@ -222,23 +206,45 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       expect(res.status, `Expected 400 for unlisted redirect_uri ${badUri}`).toBe(400);
     }
 
-    const badClientRes = await request(app)
+    const emptyClientRes = await request(app)
       .get('/authorize')
       .set('Host', 'mcp.example.com')
       .query({
         response_type: 'code',
-        client_id: 'unknown-client',
-        redirect_uri: 'https://oauth-redirect.googleusercontent.com/r/gemini-prod-123',
+        client_id: '',
+        redirect_uri: 'http://localhost:54321/callback',
         code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
         code_challenge_method: 'S256',
       });
 
-    expect(badClientRes.status).toBe(400);
+    expect(emptyClientRes.status).toBe(400);
+  });
+
+  it('enforces strict redirect URI rules in isAllowedRedirectUri (HTTPS for remote, RFC 8252 loopback path & host)', async () => {
+    const { isAllowedRedirectUri } = await import('../src/auth/provider.js');
+
+    // Remote URI must be HTTPS
+    expect(isAllowedRedirectUri('http://remote.example.com/callback', ['http://remote.example.com/callback'])).toBe(false);
+    expect(isAllowedRedirectUri('https://remote.example.com/callback', ['https://remote.example.com/callback'])).toBe(true);
+
+    // IPv6 [::1] not allowed as loopback
+    expect(isAllowedRedirectUri('http://[::1]:54321/callback', ['http://localhost'])).toBe(false);
+
+    // Loopback path check when specific path is configured
+    expect(isAllowedRedirectUri('http://localhost:8080/auth/callback', ['http://localhost/auth/callback'])).toBe(true);
+    expect(isAllowedRedirectUri('http://localhost:8080/wrong/path', ['http://localhost/auth/callback'])).toBe(false);
+
+    // Cross-loopback (localhost <-> 127.0.0.1)
+    expect(isAllowedRedirectUri('http://127.0.0.1:8080/auth/callback', ['http://localhost/auth/callback'])).toBe(true);
+    expect(isAllowedRedirectUri('http://localhost:8080/auth/callback', ['http://127.0.0.1/auth/callback'])).toBe(true);
+
+    // Root loopback allows any path on loopback
+    expect(isAllowedRedirectUri('http://localhost:54321/any/path', ['http://localhost'])).toBe(true);
   });
 
   it('verifies OAUTH_ADMIN_PASSWORD on POST /authorize, rejecting wrong passphrases with 401 and redirecting with code and state when valid', async () => {
     const app = createApp({ config, budgetGateway: createStubGateway() });
-    const redirectUri = 'https://oauth-redirect.googleusercontent.com/r/gemini-prod-123';
+    const redirectUri = 'http://localhost:54321/callback';
 
     const wrongPassRes = await request(app)
       .post('/authorize')
@@ -282,7 +288,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
 
   it('enforces IP rate-limiting on POST /authorize against brute-force passphrase attempts', async () => {
     const app = createApp({ config, budgetGateway: createStubGateway() });
-    const redirectUri = 'https://oauth-redirect.googleusercontent.com/r/gemini-prod-123';
+    const redirectUri = 'http://localhost:54321/callback';
 
     const statuses: number[] = [];
     for (let i = 0; i < 12; i++) {
@@ -308,7 +314,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
 
   it('exchanges a single-use authorization code with S256 PKCE verification for an access_token (expires_in: 3600) and refresh_token, and authorizes POST /mcp', async () => {
     const app = createApp({ config, budgetGateway: createStubGateway() });
-    const redirectUri = 'https://oauth-redirect.googleusercontent.com/r/gemini-prod-123';
+    const redirectUri = 'http://localhost:54321/callback';
     const codeVerifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk-extra-entropy-12345';
     const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
 
@@ -339,7 +345,6 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       .send({
         grant_type: 'authorization_code',
         client_id: 'gemini-client',
-        client_secret: 'super-secret-value',
         code,
         code_verifier: 'wrong-code-verifier-that-is-long-enough-for-pkce-check-000000',
         redirect_uri: redirectUri,
@@ -372,7 +377,6 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       .send({
         grant_type: 'authorization_code',
         client_id: 'gemini-client',
-        client_secret: 'super-secret-value',
         code: code2,
         code_verifier: codeVerifier,
         redirect_uri: redirectUri,
@@ -394,7 +398,6 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       .send({
         grant_type: 'authorization_code',
         client_id: 'gemini-client',
-        client_secret: 'super-secret-value',
         code: code2,
         code_verifier: codeVerifier,
         redirect_uri: redirectUri,
@@ -433,12 +436,11 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     ]);
   });
 
-  it('accepts client credentials via both Authorization: Basic (client_secret_basic) and form body (client_secret_post) on POST /token and POST /revoke', async () => {
+  it('exchanges tokens and revokes them as a public client (auth_method none) without a client_secret on POST /token and POST /revoke', async () => {
     const app = createApp({ config, budgetGateway: createStubGateway() });
-    const redirectUri = 'https://oauth-redirect.googleusercontent.com/r/gemini-prod-123';
+    const redirectUri = 'http://localhost:54321/callback';
     const codeVerifier = 'basic-auth-verifier-with-sufficient-entropy-1234567890-abcdef';
     const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
-    const basicHeader = `Basic ${Buffer.from('gemini-client:super-secret-value', 'utf8').toString('base64')}`;
 
     const authRes = await request(app)
       .post('/authorize')
@@ -446,7 +448,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       .type('form')
       .send({
         response_type: 'code',
-        client_id: 'gemini-client',
+        client_id: 'public-ai-agent',
         redirect_uri: redirectUri,
         code_challenge: codeChallenge,
         code_challenge_method: 'S256',
@@ -454,14 +456,14 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       });
     const code = new URL(authRes.headers.location).searchParams.get('code')!;
 
-    // Exchange token using client_secret_basic only (no client_id or client_secret in body)
+    // Exchange token as public client (no client_secret)
     const tokenRes = await request(app)
       .post('/token')
       .set('Host', 'mcp.example.com')
-      .set('Authorization', basicHeader)
       .type('form')
       .send({
         grant_type: 'authorization_code',
+        client_id: 'public-ai-agent',
         code,
         code_verifier: codeVerifier,
         redirect_uri: redirectUri,
@@ -471,13 +473,13 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     const accessToken = tokenRes.body.access_token as string;
     expect(accessToken).toEqual(expect.any(String));
 
-    // Revoke token using client_secret_basic only
+    // Revoke token as public client
     const revokeRes = await request(app)
       .post('/revoke')
       .set('Host', 'mcp.example.com')
-      .set('Authorization', basicHeader)
       .type('form')
       .send({
+        client_id: 'public-ai-agent',
         token: accessToken,
       });
 
@@ -502,7 +504,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
 
   it('persists tokens to oauth-tokens.json across server restarts and renews access_token on grant_type=refresh_token without rotating refresh_token while extending its sliding expiration', async () => {
     const app1 = createApp({ config, budgetGateway: createStubGateway() });
-    const redirectUri = 'https://oauth-redirect.googleusercontent.com/r/gemini-prod-123';
+    const redirectUri = 'http://localhost:54321/callback';
     const codeVerifier = 'refresh-persistence-verifier-with-entropy-9876543210-zyxwv';
     const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
 
@@ -527,7 +529,6 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       .send({
         grant_type: 'authorization_code',
         client_id: 'gemini-client',
-        client_secret: 'super-secret-value',
         code,
         code_verifier: codeVerifier,
         redirect_uri: redirectUri,
@@ -571,7 +572,6 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       .send({
         grant_type: 'refresh_token',
         client_id: 'gemini-client',
-        client_secret: 'super-secret-value',
         refresh_token: initialRefreshToken,
       });
 
@@ -613,7 +613,6 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       .send({
         grant_type: 'refresh_token',
         client_id: 'gemini-client',
-        client_secret: 'super-secret-value',
         refresh_token: 'non-existent-refresh-token',
       });
     expect(badRefreshRes.status).toBe(400);

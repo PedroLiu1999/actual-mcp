@@ -13,7 +13,7 @@ import type {
   OAuthMetadata,
   OAuthProtectedResourceMetadata,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
-import express, { type Express, type RequestHandler } from 'express';
+import express, { type Express } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { EmbeddedOAuthProvider } from './auth/provider.js';
 import type { AppConfig } from './config.js';
@@ -25,36 +25,6 @@ export interface CreateAppOptions {
   config: AppConfig;
   budgetGateway: BudgetGateway;
 }
-
-const basicClientAuthShim: RequestHandler = (req, _res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.toLowerCase().startsWith('basic ')) {
-    next();
-    return;
-  }
-
-  if (!req.body || typeof req.body !== 'object') {
-    req.body = {};
-  }
-
-  if (req.body.client_id === undefined) {
-    try {
-      const encoded = authHeader.slice(6).trim();
-      const decoded = Buffer.from(encoded, 'base64').toString('utf8');
-      const colonIndex = decoded.indexOf(':');
-      if (colonIndex !== -1) {
-        const rawClientId = decoded.slice(0, colonIndex);
-        const rawClientSecret = decoded.slice(colonIndex + 1);
-        req.body.client_id = decodeURIComponent(rawClientId);
-        req.body.client_secret = decodeURIComponent(rawClientSecret);
-      }
-    } catch {
-      // Fall through and let downstream client authentication reject malformed credentials
-    }
-  }
-
-  next();
-};
 
 export function createApp({ config, budgetGateway }: CreateAppOptions): Express {
   const app = express();
@@ -82,8 +52,8 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
     }),
     issuer: config.PUBLIC_URL,
     logo_uri: logoUrl,
-    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
-    revocation_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+    token_endpoint_auth_methods_supported: ['none'],
+    revocation_endpoint_auth_methods_supported: ['none'],
   };
 
   const protectedResourceMetadata: OAuthProtectedResourceMetadata = {
@@ -159,8 +129,8 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
     next();
   });
 
-  app.use('/token', express.urlencoded({ extended: false }), basicClientAuthShim);
-  app.use('/revoke', express.urlencoded({ extended: false }), basicClientAuthShim);
+  app.use('/token', express.urlencoded({ extended: false }));
+  app.use('/revoke', express.urlencoded({ extended: false }));
 
   app.use(
     mcpAuthRouter({

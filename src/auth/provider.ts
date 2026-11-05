@@ -22,25 +22,12 @@ import {
   REFRESH_TOKEN_TTL_SECONDS,
 } from './tokenStore.js';
 
-const GOOGLE_REDIRECT_HOSTS = new Set([
-  'oauth-redirect.googleusercontent.com',
-  'oauth-redirect-sandbox.googleusercontent.com',
-  'oauth-redirect-test.googleusercontent.com',
-]);
-
-const VERTEX_REDIRECT_URI = 'https://vertexaisearch.cloud.google.com/oauth-redirect';
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1']);
 
 export function isAllowedRedirectUri(
   redirectUri: string,
-  extraRedirectUris: readonly string[] = [],
+  allowedRedirectUris: readonly string[] = [],
 ): boolean {
-  if (redirectUri === VERTEX_REDIRECT_URI) {
-    return true;
-  }
-  if (extraRedirectUris.includes(redirectUri)) {
-    return true;
-  }
-
   let parsed: URL;
   try {
     parsed = new URL(redirectUri);
@@ -48,24 +35,38 @@ export function isAllowedRedirectUri(
     return false;
   }
 
-  if (parsed.protocol !== 'https:' || parsed.port !== '' || parsed.username !== '' || parsed.password !== '') {
+  if (parsed.pathname.includes('..') || parsed.username !== '' || parsed.password !== '') {
     return false;
   }
 
-  if (!GOOGLE_REDIRECT_HOSTS.has(parsed.hostname)) {
+  const isLoopbackCandidate = LOOPBACK_HOSTS.has(parsed.hostname);
+
+  // Non-loopback URIs MUST use https://
+  if (!isLoopbackCandidate && parsed.protocol !== 'https:') {
     return false;
   }
 
-  if (parsed.pathname.includes('..')) {
-    return false;
-  }
-
-  if (parsed.pathname.startsWith('/r/') && parsed.pathname.length > 3) {
-    return true;
-  }
-
-  if (parsed.pathname.startsWith('/a/') && parsed.pathname.length > 3) {
-    return true;
+  for (const allowed of allowedRedirectUris) {
+    if (allowed === redirectUri) {
+      return true;
+    }
+    try {
+      const parsedAllowed = new URL(allowed);
+      if (isLoopbackCandidate && LOOPBACK_HOSTS.has(parsedAllowed.hostname)) {
+        if (parsedAllowed.protocol !== parsed.protocol) {
+          continue;
+        }
+        // If an explicit path is configured on loopback, candidate pathname must match
+        if (parsedAllowed.pathname !== '/' && parsedAllowed.pathname !== '') {
+          if (parsed.pathname !== parsedAllowed.pathname) {
+            continue;
+          }
+        }
+        return true;
+      }
+    } catch {
+      // Ignore invalid configured allowed URI
+    }
   }
 
   return false;
@@ -160,19 +161,15 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
   constructor(config: AppConfig) {
     this.config = config;
     this.tokenStore = new FileTokenStore(config.DATA_DIR);
-    this.allowedRedirectUris = new Set<string>([
-      VERTEX_REDIRECT_URI,
-      ...config.OAUTH_EXTRA_REDIRECT_URIS,
-    ]);
+    this.allowedRedirectUris = new Set<string>(config.OAUTH_ALLOWED_REDIRECT_URIS);
 
     this.store = {
       getClient: (clientId: string) => {
-        if (clientId !== this.config.OAUTH_CLIENT_ID) {
+        if (!clientId || clientId.trim() === '') {
           return undefined;
         }
         return {
-          client_id: this.config.OAUTH_CLIENT_ID,
-          client_secret: this.config.OAUTH_CLIENT_SECRET,
+          client_id: clientId,
           redirect_uris: Array.from(this.allowedRedirectUris),
         };
       },
@@ -182,7 +179,7 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
   recordCandidateRedirectUri(redirectUri: unknown): void {
     if (
       typeof redirectUri === 'string' &&
-      isAllowedRedirectUri(redirectUri, this.config.OAUTH_EXTRA_REDIRECT_URIS)
+      isAllowedRedirectUri(redirectUri, this.config.OAUTH_ALLOWED_REDIRECT_URIS)
     ) {
       this.allowedRedirectUris.add(redirectUri);
     }

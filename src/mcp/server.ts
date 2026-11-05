@@ -881,5 +881,123 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     },
   );
 
+  server.registerTool(
+    'set_budget_carryover',
+    {
+      title: 'Set Budget Carryover',
+      description:
+        'Set the carryover flag for a category envelope in a specified budget month (YYYY-MM). When true, overspent category balance rolls over into next month.',
+      inputSchema: {
+        month: budgetMonthSchema.describe(
+          'Target Budget Month in YYYY-MM format (e.g. 2026-11).',
+        ),
+        categoryId: z.string().min(1).describe('Target category UUID.'),
+        carryover: z
+          .boolean()
+          .describe(
+            'Whether to roll over overspending for this category envelope into the following month.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async ({ month, categoryId, carryover }) => {
+      if (!budgetGateway.setBudgetCarryover) {
+        throw new Error(
+          'setBudgetCarryover is not supported by the configured BudgetGateway',
+        );
+      }
+      await budgetGateway.setBudgetCarryover(month, categoryId, carryover);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              { success: true, month, categoryId, carryover },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'hold_budget_for_next_month',
+    {
+      title: 'Hold Budget For Next Month',
+      description:
+        'Hold a specified Decimal Amount from the current month available budget to buffer next month.',
+      inputSchema: {
+        month: budgetMonthSchema.describe(
+          'Target Budget Month in YYYY-MM format (e.g. 2026-11).',
+        ),
+        amount: z
+          .number()
+          .finite()
+          .describe(
+            'Decimal Amount to hold from current month available funds for next month.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async ({ month, amount }) => {
+      if (!budgetGateway.holdBudgetForNextMonth) {
+        throw new Error(
+          'holdBudgetForNextMonth is not supported by the configured BudgetGateway',
+        );
+      }
+      const success = await budgetGateway.holdBudgetForNextMonth(month, amount);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ success, month, amount }, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'reset_budget_hold',
+    {
+      title: 'Reset Budget Hold',
+      description:
+        'Reset the budget hold for a given month, releasing any held reserve funds back to the current month available budget.',
+      inputSchema: {
+        month: budgetMonthSchema.describe(
+          'Target Budget Month in YYYY-MM format (e.g. 2026-11).',
+        ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async ({ month }) => {
+      if (!budgetGateway.resetBudgetHold) {
+        throw new Error(
+          'resetBudgetHold is not supported by the configured BudgetGateway',
+        );
+      }
+      await budgetGateway.resetBudgetHold(month);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ success: true, month }, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
   return server;
 }

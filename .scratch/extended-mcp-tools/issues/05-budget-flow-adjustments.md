@@ -4,10 +4,10 @@
 
 **Blocked by:** 01: Category and Category Group Management Tools
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `set_budget_carryover` accepts `month` in `YYYY-MM` format, `categoryId`, and `carryover` boolean flag, toggling overspending rollover.
-- [ ] `hold_budget_for_next_month` accepts `month` in `YYYY-MM` format and `amount` as a Decimal Amount, converting to Minor Units and reserving funds for the following month.
-- [ ] `reset_budget_hold` accepts `month` in `YYYY-MM` format, releasing any held reserve funds back to available budget.
-- [ ] Mutations trigger immediate Coalesced Sync upstream.
-- [ ] End-to-end HTTP integration tests pass exercising carryover and hold modifications via JSON-RPC `tools/call`.
+- [x] `set_budget_carryover` accepts `month` in `YYYY-MM` format, `categoryId`, and `carryover` boolean flag, toggling overspending rollover.
+- [x] `hold_budget_for_next_month` accepts `month` in `YYYY-MM` format and `amount` as a Decimal Amount, converting to Minor Units and reserving funds for the following month.
+- [x] `reset_budget_hold` accepts `month` in `YYYY-MM` format, releasing any held reserve funds back to available budget.
+- [x] Mutations trigger immediate Coalesced Sync upstream.
+- [x] End-to-end HTTP integration tests pass exercising carryover and hold modifications via JSON-RPC `tools/call`.

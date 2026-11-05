@@ -303,6 +303,13 @@ export interface BudgetGateway {
   createCategoryGroup?(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult>;
   updateCategoryGroup?(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult>;
   deleteCategoryGroup?(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult>;
+  setBudgetCarryover?(
+    month: string,
+    categoryId: string,
+    carryover: boolean,
+  ): Promise<void>;
+  holdBudgetForNextMonth?(month: string, amount: number): Promise<boolean>;
+  resetBudgetHold?(month: string): Promise<void>;
   initialize?(): Promise<void>;
   sync?(): Promise<void>;
   shutdown?(): Promise<void>;

@@ -1207,6 +1207,142 @@ describe('BudgetGateway seam — category and category group mutations & cache i
     expect(deleteRes).toEqual({ id: 'grp-new-1', success: true });
     expect(events).toEqual(['api:sync', 'api:deleteCategoryGroup:grp-new-1:cat-general', 'api:sync']);
   });
+
+  describe('Budget flow adjustment methods', () => {
+    it('executes setBudgetCarryover within executeWrite (sync before, call, sync after)', async () => {
+      const events: string[] = [];
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {
+          events.push('api:sync');
+        },
+        setBudgetCarryover: async (month, categoryId, flag) => {
+          events.push(`api:setBudgetCarryover:${month}:${categoryId}:${flag}`);
+        },
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      await gateway.setBudgetCarryover!('2026-11', 'cat-food', true);
+      expect(events).toEqual([
+        'api:sync',
+        'api:setBudgetCarryover:2026-11:cat-food:true',
+        'api:sync',
+      ]);
+    });
+
+    it('throws if api.setBudgetCarryover is not supported', async () => {
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {},
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      await expect(
+        gateway.setBudgetCarryover!('2026-11', 'cat-food', true),
+      ).rejects.toThrow('setBudgetCarryover is not supported by the current API adapter');
+    });
+
+    it('executes holdBudgetForNextMonth within executeWrite, converts Decimal Amount to Minor Units, and returns boolean', async () => {
+      const events: string[] = [];
+      let capturedMinorUnits: number | undefined;
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {
+          events.push('api:sync');
+        },
+        holdBudgetForNextMonth: async (month, amount) => {
+          capturedMinorUnits = amount;
+          events.push(`api:holdBudgetForNextMonth:${month}:${amount}`);
+          return true;
+        },
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      const result = await gateway.holdBudgetForNextMonth!('2026-11', 123.45);
+      expect(result).toBe(true);
+      expect(capturedMinorUnits).toBe(12345);
+      expect(events).toEqual([
+        'api:sync',
+        'api:holdBudgetForNextMonth:2026-11:12345',
+        'api:sync',
+      ]);
+    });
+
+    it('throws if api.holdBudgetForNextMonth is not supported', async () => {
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {},
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      await expect(
+        gateway.holdBudgetForNextMonth!('2026-11', 100),
+      ).rejects.toThrow('holdBudgetForNextMonth is not supported by the current API adapter');
+    });
+
+    it('executes resetBudgetHold within executeWrite (sync before, call, sync after)', async () => {
+      const events: string[] = [];
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {
+          events.push('api:sync');
+        },
+        resetBudgetHold: async (month) => {
+          events.push(`api:resetBudgetHold:${month}`);
+        },
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      await gateway.resetBudgetHold!('2026-11');
+      expect(events).toEqual([
+        'api:sync',
+        'api:resetBudgetHold:2026-11',
+        'api:sync',
+      ]);
+    });
+
+    it('throws if api.resetBudgetHold is not supported', async () => {
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {},
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      await expect(
+        gateway.resetBudgetHold!('2026-11'),
+      ).rejects.toThrow('resetBudgetHold is not supported by the current API adapter');
+    });
+  });
 });
 
 

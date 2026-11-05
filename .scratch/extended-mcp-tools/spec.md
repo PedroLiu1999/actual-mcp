@@ -1,6 +1,6 @@
 # Spec: Extended MCP Tool Suite for Budget Lifecycle and Bank Sync
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 

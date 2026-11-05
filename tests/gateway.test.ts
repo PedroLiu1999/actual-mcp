@@ -1032,6 +1032,716 @@ describe('BudgetGateway seam — createActualBudgetGateway getTransactions', () 
   });
 });
 
+describe('BudgetGateway seam — category and category group mutations & cache invalidation', () => {
+  it('creates, updates, and deletes categories with Coalesced Sync before/after and invalidates in-memory category cache', async () => {
+    const events: string[] = [];
+    let categoryGroupsList = [
+      {
+        id: 'group-1',
+        name: 'Daily Living',
+        is_income: false,
+        hidden: false,
+        categories: [
+          { id: 'cat-1', name: 'Groceries', group_id: 'group-1', is_income: false, hidden: false },
+        ],
+      },
+    ];
+
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      sync: async () => {
+        events.push('api:sync');
+      },
+      getCategoryGroups: async () => {
+        events.push('api:getCategoryGroups');
+        return categoryGroupsList;
+      },
+      createCategory: async (category) => {
+        events.push(`api:createCategory:${category.name}`);
+        return 'cat-new-1';
+      },
+      updateCategory: async (id, fields) => {
+        events.push(`api:updateCategory:${id}:${JSON.stringify(fields)}`);
+      },
+      deleteCategory: async (id, transferCategoryId) => {
+        events.push(`api:deleteCategory:${id}:${transferCategoryId}`);
+      },
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+      syncTtlSeconds: 60,
+    });
+
+    // Initial read populates the in-memory categories cache
+    const initial = await gateway.listCategories();
+    expect(initial).toHaveLength(1);
+    expect(events).toEqual(['api:sync', 'api:getCategoryGroups']);
+
+    // Second read within TTL uses cached categories (no new api:getCategoryGroups call)
+    events.length = 0;
+    const second = await gateway.listCategories();
+    expect(second).toEqual(initial);
+    expect(events).toEqual([]);
+
+    // createCategory triggers sync before, executes mutation, syncs after, invalidates cache
+    events.length = 0;
+    const createRes = await gateway.createCategory!({
+      name: 'Coffee',
+      groupId: 'group-1',
+      isIncome: false,
+      hidden: false,
+    });
+    expect(createRes).toEqual({ id: 'cat-new-1' });
+    expect(events).toEqual(['api:sync', 'api:createCategory:Coffee', 'api:sync']);
+
+    // Subsequent listCategories must bypass cache and fetch fresh state
+    categoryGroupsList = [
+      {
+        id: 'group-1',
+        name: 'Daily Living',
+        is_income: false,
+        hidden: false,
+        categories: [
+          { id: 'cat-1', name: 'Groceries', group_id: 'group-1', is_income: false, hidden: false },
+          { id: 'cat-new-1', name: 'Coffee', group_id: 'group-1', is_income: false, hidden: false },
+        ],
+      },
+    ];
+    events.length = 0;
+    const afterCreate = await gateway.listCategories();
+    expect(afterCreate[0].categories).toHaveLength(2);
+    expect(events).toEqual(['api:getCategoryGroups']);
+
+    // updateCategory maps groupId to group_id and invalidates cache
+    events.length = 0;
+    const updateRes = await gateway.updateCategory!({
+      id: 'cat-new-1',
+      name: 'Specialty Coffee',
+      groupId: 'group-1',
+      hidden: true,
+    });
+    expect(updateRes).toEqual({ id: 'cat-new-1', success: true });
+    expect(events).toEqual([
+      'api:sync',
+      'api:updateCategory:cat-new-1:{"name":"Specialty Coffee","group_id":"group-1","hidden":true}',
+      'api:sync',
+    ]);
+
+    // deleteCategory forwards transferCategoryId and invalidates cache
+    events.length = 0;
+    const deleteRes = await gateway.deleteCategory!({
+      id: 'cat-new-1',
+      transferCategoryId: 'cat-1',
+    });
+    expect(deleteRes).toEqual({ id: 'cat-new-1', success: true });
+    expect(events).toEqual(['api:sync', 'api:deleteCategory:cat-new-1:cat-1', 'api:sync']);
+  });
+
+  it('creates, updates, and deletes category groups with Coalesced Sync before/after and invalidates in-memory category cache', async () => {
+    const events: string[] = [];
+
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      sync: async () => {
+        events.push('api:sync');
+      },
+      getCategoryGroups: async () => {
+        events.push('api:getCategoryGroups');
+        return [];
+      },
+      createCategoryGroup: async (group) => {
+        events.push(`api:createCategoryGroup:${group.name}`);
+        return 'grp-new-1';
+      },
+      updateCategoryGroup: async (id, fields) => {
+        events.push(`api:updateCategoryGroup:${id}:${JSON.stringify(fields)}`);
+      },
+      deleteCategoryGroup: async (id, transferCategoryId) => {
+        events.push(`api:deleteCategoryGroup:${id}:${transferCategoryId}`);
+      },
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+      syncTtlSeconds: 60,
+    });
+
+    // Populate cache
+    await gateway.listCategories();
+
+    // createCategoryGroup
+    events.length = 0;
+    const createRes = await gateway.createCategoryGroup!({
+      name: 'Investments',
+      isIncome: false,
+      hidden: false,
+    });
+    expect(createRes).toEqual({ id: 'grp-new-1' });
+    expect(events).toEqual(['api:sync', 'api:createCategoryGroup:Investments', 'api:sync']);
+
+    // updateCategoryGroup
+    events.length = 0;
+    const updateRes = await gateway.updateCategoryGroup!({
+      id: 'grp-new-1',
+      name: 'Retirement & Investments',
+      hidden: true,
+    });
+    expect(updateRes).toEqual({ id: 'grp-new-1', success: true });
+    expect(events).toEqual([
+      'api:sync',
+      'api:updateCategoryGroup:grp-new-1:{"name":"Retirement & Investments","hidden":true}',
+      'api:sync',
+    ]);
+
+    // deleteCategoryGroup
+    events.length = 0;
+    const deleteRes = await gateway.deleteCategoryGroup!({
+      id: 'grp-new-1',
+      transferCategoryId: 'cat-general',
+    });
+    expect(deleteRes).toEqual({ id: 'grp-new-1', success: true });
+    expect(events).toEqual(['api:sync', 'api:deleteCategoryGroup:grp-new-1:cat-general', 'api:sync']);
+  });
+
+  it('manages account lifecycles (create, update, close, reopen) with Coalesced Sync before/after and decimal-to-minor balance conversion', async () => {
+    const events: string[] = [];
+
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [
+        { id: 'acct-existing', name: 'Checking', offbudget: false, closed: false },
+      ],
+      getAccountBalance: async () => 100000,
+      sync: async () => {
+        events.push('api:sync');
+      },
+      createAccount: async (account, initialBalance) => {
+        events.push(
+          `api:createAccount:${JSON.stringify(account)}:${initialBalance !== undefined ? initialBalance : 'none'}`,
+        );
+        return 'acct-new-1';
+      },
+      updateAccount: async (id, fields) => {
+        events.push(`api:updateAccount:${id}:${JSON.stringify(fields)}`);
+      },
+      closeAccount: async (id, transferAccountId, transferCategoryId) => {
+        events.push(
+          `api:closeAccount:${id}:${transferAccountId ?? 'none'}:${transferCategoryId ?? 'none'}`,
+        );
+      },
+      reopenAccount: async (id) => {
+        events.push(`api:reopenAccount:${id}`);
+      },
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+      syncTtlSeconds: 60,
+    });
+
+    // 1. createAccount with Decimal Amount initialBalance converted to Minor Unit Amount
+    events.length = 0;
+    const createRes = await gateway.createAccount!(
+      {
+        name: 'High Yield Savings',
+        type: 'savings',
+        offbudget: false,
+      },
+      2500.75, // $2500.75 -> 250075 minor units
+    );
+    expect(createRes).toEqual({ id: 'acct-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:createAccount:{"name":"High Yield Savings","type":"savings","offbudget":false}:250075',
+      'api:sync',
+    ]);
+
+    // 2. createAccount with no initialBalance
+    events.length = 0;
+    const createNoBalRes = await gateway.createAccount!({
+      name: 'Credit Card',
+      type: 'credit',
+      offbudget: false,
+    });
+    expect(createNoBalRes).toEqual({ id: 'acct-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:createAccount:{"name":"Credit Card","type":"credit","offbudget":false}:none',
+      'api:sync',
+    ]);
+
+    // 3. updateAccount updates name and toggles flags
+    events.length = 0;
+    const updateRes = await gateway.updateAccount!('acct-new-1', {
+      name: 'Primary Credit Card',
+      offbudget: true,
+    });
+    expect(updateRes).toEqual({ id: 'acct-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:updateAccount:acct-new-1:{"name":"Primary Credit Card","offbudget":true}',
+      'api:sync',
+    ]);
+
+    // 4. closeAccount rejects closing an account with non-zero balance without transferAccountId
+    await expect(gateway.closeAccount!('acct-new-1')).rejects.toThrow(
+      'Cannot close account "acct-new-1" with non-zero balance (100000) without specifying transferAccountId.',
+    );
+
+    // closeAccount succeeds when balance is 0 without transferAccountId
+    fakeApi.getAccountBalance = async () => 0;
+    events.length = 0;
+    const closeZeroRes = await gateway.closeAccount!('acct-new-1');
+    expect(closeZeroRes).toEqual({ id: 'acct-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:closeAccount:acct-new-1:none:none',
+      'api:sync',
+    ]);
+
+    // closeAccount forwards balance transfer targets when specified
+    events.length = 0;
+    const closeRes = await gateway.closeAccount!(
+      'acct-new-1',
+      'acct-existing',
+      'cat-transfer',
+    );
+    expect(closeRes).toEqual({ id: 'acct-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:closeAccount:acct-new-1:acct-existing:cat-transfer',
+      'api:sync',
+    ]);
+
+    // 5. reopenAccount reactivates the account
+    events.length = 0;
+    const reopenRes = await gateway.reopenAccount!('acct-new-1');
+    expect(reopenRes).toEqual({ id: 'acct-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:reopenAccount:acct-new-1',
+      'api:sync',
+    ]);
+  });
+
+  it('caches listPayees in-memory, serves cache within TTL, and invalidates on forceSync or sync', async () => {
+    let syncCount = 0;
+    let getPayeesCount = 0;
+    let currentTime = 100000;
+
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      sync: async () => {
+        syncCount++;
+      },
+      getPayees: async () => {
+        getPayeesCount++;
+        return [
+          { id: 'p1', name: 'Payee One' },
+          { id: 'p2', name: 'Payee Two', transfer_acct: 'acct-1' },
+        ];
+      },
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+      syncTtlSeconds: 30,
+      now: () => currentTime,
+    });
+
+    // 1st call: initial sync + read, populates cache
+    const payees1 = await gateway.listPayees();
+    expect(payees1).toEqual([
+      { id: 'p1', name: 'Payee One', transfer_acct: null },
+      { id: 'p2', name: 'Payee Two', transfer_acct: 'acct-1' },
+    ]);
+    expect(syncCount).toBe(1);
+    expect(getPayeesCount).toBe(1);
+
+    // 2nd call: within TTL, should serve from cache without calling getPayees or sync
+    currentTime += 10000; // 10s later
+    const payees2 = await gateway.listPayees();
+    expect(payees2).toEqual(payees1);
+    expect(syncCount).toBe(1);
+    expect(getPayeesCount).toBe(1);
+
+    // 3rd call: forceSync should invalidate cache and re-read
+    const payees3 = await gateway.listPayees({ forceSync: true });
+    expect(payees3).toEqual(payees1);
+    expect(syncCount).toBe(2);
+    expect(getPayeesCount).toBe(2);
+
+    // 4th call: manual sync() should invalidate cache
+    await gateway.sync();
+    expect(syncCount).toBe(3);
+
+    await gateway.listPayees();
+    expect(getPayeesCount).toBe(3);
+  });
+
+  it('creates, updates, deletes, and merges payees with Coalesced Sync before/after and invalidates in-memory payee cache', async () => {
+    const events: string[] = [];
+
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      sync: async () => {
+        events.push('api:sync');
+      },
+      getPayees: async () => {
+        events.push('api:getPayees');
+        return [{ id: 'p1', name: 'Payee One' }];
+      },
+      createPayee: async (payee) => {
+        events.push(`api:createPayee:${payee.name}`);
+        return 'payee-new-1';
+      },
+      updatePayee: async (id, fields) => {
+        events.push(`api:updatePayee:${id}:${JSON.stringify(fields)}`);
+      },
+      deletePayee: async (id) => {
+        events.push(`api:deletePayee:${id}`);
+      },
+      mergePayees: async (targetId, mergeIds) => {
+        events.push(`api:mergePayees:${targetId}:${JSON.stringify(mergeIds)}`);
+      },
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+      syncTtlSeconds: 60,
+    });
+
+    // Populate payee cache
+    await gateway.listPayees();
+    expect(events).toEqual(['api:sync', 'api:getPayees']);
+
+    // createPayee
+    events.length = 0;
+    const createRes = await gateway.createPayee!({ name: 'Costco Wholesale' });
+    expect(createRes).toEqual({ id: 'payee-new-1' });
+    expect(events).toEqual(['api:sync', 'api:createPayee:Costco Wholesale', 'api:sync']);
+
+    // Next listPayees must re-fetch due to cache invalidation
+    events.length = 0;
+    await gateway.listPayees();
+    expect(events).toContain('api:getPayees');
+
+    // updatePayee
+    events.length = 0;
+    const updateRes = await gateway.updatePayee!('payee-new-1', { name: 'Costco' });
+    expect(updateRes).toEqual({ id: 'payee-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:updatePayee:payee-new-1:{"name":"Costco"}',
+      'api:sync',
+    ]);
+
+    // deletePayee
+    events.length = 0;
+    const deleteRes = await gateway.deletePayee!('payee-old');
+    expect(deleteRes).toEqual({ id: 'payee-old' });
+    expect(events).toEqual(['api:sync', 'api:deletePayee:payee-old', 'api:sync']);
+
+    // mergePayees
+    events.length = 0;
+    const mergeRes = await gateway.mergePayees!('payee-target', ['payee-src-1', 'payee-src-2']);
+    expect(mergeRes).toEqual({ targetId: 'payee-target', mergedCount: 2 });
+    expect(events).toEqual([
+      'api:sync',
+      'api:mergePayees:payee-target:["payee-src-1","payee-src-2"]',
+      'api:sync',
+    ]);
+  });
+
+  describe('Budget flow adjustment methods', () => {
+    it('executes setBudgetCarryover within executeWrite (sync before, call, sync after)', async () => {
+      const events: string[] = [];
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {
+          events.push('api:sync');
+        },
+        setBudgetCarryover: async (month, categoryId, flag) => {
+          events.push(`api:setBudgetCarryover:${month}:${categoryId}:${flag}`);
+        },
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      await gateway.setBudgetCarryover!('2026-11', 'cat-food', true);
+      expect(events).toEqual([
+        'api:sync',
+        'api:setBudgetCarryover:2026-11:cat-food:true',
+        'api:sync',
+      ]);
+    });
+
+    it('throws if api.setBudgetCarryover is not supported', async () => {
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {},
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      await expect(
+        gateway.setBudgetCarryover!('2026-11', 'cat-food', true),
+      ).rejects.toThrow('setBudgetCarryover is not supported by the current API adapter');
+    });
+
+    it('executes holdBudgetForNextMonth within executeWrite, converts Decimal Amount to Minor Units, and returns boolean', async () => {
+      const events: string[] = [];
+      let capturedMinorUnits: number | undefined;
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {
+          events.push('api:sync');
+        },
+        holdBudgetForNextMonth: async (month, amount) => {
+          capturedMinorUnits = amount;
+          events.push(`api:holdBudgetForNextMonth:${month}:${amount}`);
+          return true;
+        },
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      const result = await gateway.holdBudgetForNextMonth!('2026-11', 123.45);
+      expect(result).toBe(true);
+      expect(capturedMinorUnits).toBe(12345);
+      expect(events).toEqual([
+        'api:sync',
+        'api:holdBudgetForNextMonth:2026-11:12345',
+        'api:sync',
+      ]);
+    });
+
+    it('throws if api.holdBudgetForNextMonth is not supported', async () => {
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {},
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      await expect(
+        gateway.holdBudgetForNextMonth!('2026-11', 100),
+      ).rejects.toThrow('holdBudgetForNextMonth is not supported by the current API adapter');
+    });
+
+    it('executes resetBudgetHold within executeWrite (sync before, call, sync after)', async () => {
+      const events: string[] = [];
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {
+          events.push('api:sync');
+        },
+        resetBudgetHold: async (month) => {
+          events.push(`api:resetBudgetHold:${month}`);
+        },
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      await gateway.resetBudgetHold!('2026-11');
+      expect(events).toEqual([
+        'api:sync',
+        'api:resetBudgetHold:2026-11',
+        'api:sync',
+      ]);
+    });
+
+    it('throws if api.resetBudgetHold is not supported', async () => {
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {},
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      await expect(
+        gateway.resetBudgetHold!('2026-11'),
+      ).rejects.toThrow('resetBudgetHold is not supported by the current API adapter');
+    });
+  });
+
+  describe('BudgetGateway seam — runBankSync', () => {
+    it('executes runBankSync for all accounts within executeWrite (pre-sync, api call, post-sync) and invalidates caches', async () => {
+      const events: string[] = [];
+      let accountsFetchCount = 0;
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => {
+          accountsFetchCount++;
+          return [{ id: 'acct-1', name: 'Checking' }];
+        },
+        getAccountBalance: async () => 10000,
+        sync: async () => {
+          events.push('api:sync');
+        },
+        runBankSync: async (args) => {
+          events.push(`api:runBankSync:${args?.accountId ?? 'all'}`);
+          return {
+            updatedAccounts: ['acct-1', 'acct-2'],
+            newTransactions: ['tx-1', 'tx-2', 'tx-3'],
+            matchedTransactions: ['tx-4'],
+          };
+        },
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      // Populate account cache
+      await gateway.listAccounts();
+      expect(accountsFetchCount).toBe(1);
+
+      // Trigger bank sync
+      const result = await gateway.runBankSync!();
+      expect(result).toEqual({
+        updatedAccountIds: ['acct-1', 'acct-2'],
+        newTransactionsCount: 3,
+        matchedTransactionsCount: 1,
+      });
+
+      expect(events).toEqual([
+        'api:sync',
+        'api:sync',
+        'api:runBankSync:all',
+        'api:sync',
+      ]);
+
+      // Cache should be invalidated, so listAccounts calls getAccounts again
+      await gateway.listAccounts();
+      expect(accountsFetchCount).toBe(2);
+    });
+
+    it('executes runBankSync for single account with args.accountId', async () => {
+      const events: string[] = [];
+      let capturedArgs: unknown;
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {
+          events.push('api:sync');
+        },
+        runBankSync: async (args) => {
+          capturedArgs = args;
+          events.push(`api:runBankSync:${args?.accountId}`);
+          return {
+            updatedAccountIds: ['acct-checking'],
+            newTransactionsCount: 2,
+            matchedTransactionsCount: 1,
+            errors: ['Warning: partial sync'],
+          };
+        },
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      const result = await gateway.runBankSync!('acct-checking');
+      expect(capturedArgs).toEqual({ accountId: 'acct-checking' });
+      expect(result).toEqual({
+        updatedAccountIds: ['acct-checking'],
+        newTransactionsCount: 2,
+        matchedTransactionsCount: 1,
+        errors: ['Warning: partial sync'],
+      });
+      expect(events).toEqual([
+        'api:sync',
+        'api:runBankSync:acct-checking',
+        'api:sync',
+      ]);
+    });
+
+    it('throws if api.runBankSync is not supported', async () => {
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {},
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      await expect(gateway.runBankSync!()).rejects.toThrow(
+        'runBankSync is not supported by the current API adapter',
+      );
+    });
+
+    it('maps raw.updatedAccounts properly without false fallback to [accountId]', async () => {
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {},
+        runBankSync: async () => {
+          return {
+            updatedAccounts: ['acct-mapped-1'],
+            newTransactionsCount: 1,
+            matchedTransactionsCount: 0,
+          };
+        },
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      const result = await gateway.runBankSync!('acct-not-updated');
+      expect(result.updatedAccountIds).toEqual(['acct-mapped-1']);
+
+      // When raw has empty updatedAccounts, it returns empty array without falling back to [accountId]
+      fakeApi.runBankSync = async () => ({
+        updatedAccounts: [],
+        newTransactionsCount: 0,
+        matchedTransactionsCount: 0,
+      });
+      const emptyResult = await gateway.runBankSync!('acct-not-updated');
+      expect(emptyResult.updatedAccountIds).toEqual([]);
+    });
+  });
+});
+
 
 
 

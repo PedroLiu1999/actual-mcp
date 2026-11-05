@@ -8,6 +8,15 @@ export type {
   StructuredAqlQueryInput,
 } from './aql.js';
 
+export type AccountType =
+  | 'checking'
+  | 'savings'
+  | 'credit'
+  | 'investment'
+  | 'mortgage'
+  | 'debt'
+  | 'other';
+
 export interface AccountSummary {
   id: string;
   name: string;
@@ -214,6 +223,104 @@ export interface SpendingSummary {
   groups: SpendingSummaryGroup[];
 }
 
+export interface CreateCategoryInput {
+  name: string;
+  groupId: string;
+  isIncome?: boolean;
+  hidden?: boolean;
+}
+
+export interface CreateCategoryResult {
+  id: string;
+}
+
+export interface UpdateCategoryInput {
+  id: string;
+  name?: string;
+  groupId?: string;
+  isIncome?: boolean;
+  hidden?: boolean;
+}
+
+export interface UpdateCategoryResult {
+  id: string;
+  success: boolean;
+}
+
+export interface DeleteCategoryInput {
+  id: string;
+  transferCategoryId?: string;
+}
+
+export interface DeleteCategoryResult {
+  id: string;
+  success: boolean;
+}
+
+export interface CreateCategoryGroupInput {
+  name: string;
+  isIncome?: boolean;
+  hidden?: boolean;
+}
+
+export interface CreateCategoryGroupResult {
+  id: string;
+}
+
+export interface UpdateCategoryGroupInput {
+  id: string;
+  name?: string;
+  isIncome?: boolean;
+  hidden?: boolean;
+}
+
+export interface UpdateCategoryGroupResult {
+  id: string;
+  success: boolean;
+}
+
+export interface DeleteCategoryGroupInput {
+  id: string;
+  transferCategoryId?: string;
+}
+
+export interface DeleteCategoryGroupResult {
+  id: string;
+  success: boolean;
+}
+
+export interface CreatePayeeInput {
+  name: string;
+}
+
+export interface CreatePayeeResult {
+  id: string;
+}
+
+export interface UpdatePayeeInput {
+  name?: string;
+}
+
+export interface UpdatePayeeResult {
+  id: string;
+}
+
+export interface DeletePayeeResult {
+  id: string;
+}
+
+export interface MergePayeesResult {
+  targetId: string;
+  mergedCount: number;
+}
+
+export interface RunBankSyncResult {
+  updatedAccountIds: string[];
+  newTransactionsCount: number;
+  matchedTransactionsCount: number;
+  errors?: string[];
+}
+
 export interface BudgetGateway {
   getReadiness(): BudgetReadiness;
   listAccounts(options?: { forceSync?: boolean }): Promise<AccountSummary[]>;
@@ -231,6 +338,38 @@ export interface BudgetGateway {
   updateTransaction?(input: UpdateTransactionInput): Promise<UpdateTransactionResult>;
   deleteTransaction?(id: string): Promise<DeleteTransactionResult>;
   setBudgetAmount?(input: SetBudgetAmountInput): Promise<SetBudgetAmountResult>;
+  createCategory?(input: CreateCategoryInput): Promise<CreateCategoryResult>;
+  updateCategory?(input: UpdateCategoryInput): Promise<UpdateCategoryResult>;
+  deleteCategory?(input: DeleteCategoryInput): Promise<DeleteCategoryResult>;
+  createCategoryGroup?(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult>;
+  updateCategoryGroup?(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult>;
+  deleteCategoryGroup?(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult>;
+  setBudgetCarryover?(
+    month: string,
+    categoryId: string,
+    carryover: boolean,
+  ): Promise<void>;
+  holdBudgetForNextMonth?(month: string, amount: number): Promise<boolean>;
+  resetBudgetHold?(month: string): Promise<void>;
+  createPayee?(payee: { name: string }): Promise<{ id: string }>;
+  updatePayee?(id: string, fields: { name?: string }): Promise<{ id: string }>;
+  deletePayee?(id: string): Promise<{ id: string }>;
+  mergePayees?(targetId: string, mergeIds: string[]): Promise<{ targetId: string; mergedCount: number }>;
+  createAccount?(
+    account: { name: string; type: AccountType; offbudget?: boolean },
+    initialBalance?: number,
+  ): Promise<{ id: string }>;
+  updateAccount?(
+    id: string,
+    fields: { name?: string; offbudget?: boolean },
+  ): Promise<{ id: string }>;
+  closeAccount?(
+    id: string,
+    transferAccountId?: string,
+    transferCategoryId?: string,
+  ): Promise<{ id: string }>;
+  reopenAccount?(id: string): Promise<{ id: string }>;
+  runBankSync?(accountId?: string): Promise<RunBankSyncResult>;
   initialize?(): Promise<void>;
   sync?(): Promise<void>;
   shutdown?(): Promise<void>;

@@ -17,3 +17,7 @@ export function minorToDecimalAmount(minorAmount: number): number {
   const result = utils.integerToAmount(minorAmount);
   return Object.is(result, -0) ? 0 : result;
 }
+
+export const toMinorUnits = decimalToMinorAmount;
+
+

@@ -1,6 +1,6 @@
 {
   "name": "actual-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Self-contained MCP server for Actual Budget over Streamable HTTP and OAuth 2.1",
   "type": "module",
   "private": true,

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import * as actualApi from '@actual-app/api';
-import { decimalToMinorAmount, minorToDecimalAmount } from '../currency.js';
+import { decimalToMinorAmount, minorToDecimalAmount, toMinorUnits } from '../currency.js';
 import {
   collectMonetaryKeys,
   compileStructuredAqlQuery,
@@ -11,6 +11,7 @@ import {
 } from './aql.js';
 import type {
   AccountSummary,
+  AccountType,
   BudgetGateway,
   BudgetMonthCategoryGroupSummary,
   BudgetMonthCategorySummary,
@@ -18,17 +19,30 @@ import type {
   BudgetReadiness,
   CategoryGroupSummary,
   CategorySummary,
+  CreateCategoryGroupInput,
+  CreateCategoryGroupResult,
+  CreateCategoryInput,
+  CreateCategoryResult,
   CreateTransactionsInput,
   CreateTransactionsResult,
+  DeleteCategoryGroupInput,
+  DeleteCategoryGroupResult,
+  DeleteCategoryInput,
+  DeleteCategoryResult,
   DeleteTransactionResult,
   GetSpendingSummaryInput,
   GetTransactionsFilter,
   PayeeSummary,
+  RunBankSyncResult,
   SetBudgetAmountInput,
   SetBudgetAmountResult,
   SpendingSummary,
   SpendingSummaryGroup,
   TransactionRecord,
+  UpdateCategoryGroupInput,
+  UpdateCategoryGroupResult,
+  UpdateCategoryInput,
+  UpdateCategoryResult,
   UpdateTransactionInput,
   UpdateTransactionResult,
 } from './types.js';
@@ -156,6 +170,48 @@ export interface ActualApiAdapter {
   deleteTransaction?(id: string): Promise<unknown>;
   setBudgetAmount?(month: string, categoryId: string, value: number): Promise<void>;
   setBudgetCarryover?(month: string, categoryId: string, flag: boolean): Promise<void>;
+  holdBudgetForNextMonth?(month: string, amount: number): Promise<unknown>;
+  resetBudgetHold?(month: string): Promise<unknown>;
+  createCategory?(category: {
+    name: string;
+    group_id: string;
+    is_income?: boolean;
+    hidden?: boolean;
+  }): Promise<string>;
+  updateCategory?(
+    id: string,
+    fields: Record<string, unknown>,
+  ): Promise<unknown>;
+  deleteCategory?(id: string, transferCategoryId?: string): Promise<unknown>;
+  createCategoryGroup?(group: {
+    name: string;
+    is_income?: boolean;
+    hidden?: boolean;
+  }): Promise<string>;
+  updateCategoryGroup?(
+    id: string,
+    fields: Record<string, unknown>,
+  ): Promise<unknown>;
+  deleteCategoryGroup?(id: string, transferCategoryId?: string): Promise<unknown>;
+  createPayee?(payee: { name: string }): Promise<string>;
+  updatePayee?(id: string, fields: Record<string, unknown>): Promise<unknown>;
+  deletePayee?(id: string): Promise<unknown>;
+  mergePayees?(targetId: string, mergeIds: string[]): Promise<unknown>;
+  createAccount?(
+    account: { name: string; type?: string; offbudget?: boolean },
+    initialBalance?: number,
+  ): Promise<string>;
+  updateAccount?(
+    id: string,
+    fields: { name?: string; offbudget?: boolean },
+  ): Promise<unknown>;
+  closeAccount?(
+    id: string,
+    transferAccountId?: string,
+    transferCategoryId?: string,
+  ): Promise<unknown>;
+  reopenAccount?(id: string): Promise<unknown>;
+  runBankSync?(args?: { accountId?: string }): Promise<unknown>;
   q?: typeof actualApi.q;
   aqlQuery?(query: ReturnType<typeof actualApi.q>): Promise<unknown>;
 }
@@ -193,6 +249,41 @@ export interface ActualBudgetGateway extends BudgetGateway {
   updateTransaction(input: UpdateTransactionInput): Promise<UpdateTransactionResult>;
   deleteTransaction(id: string): Promise<DeleteTransactionResult>;
   setBudgetAmount(input: SetBudgetAmountInput): Promise<SetBudgetAmountResult>;
+  createCategory(input: CreateCategoryInput): Promise<CreateCategoryResult>;
+  updateCategory(input: UpdateCategoryInput): Promise<UpdateCategoryResult>;
+  deleteCategory(input: DeleteCategoryInput): Promise<DeleteCategoryResult>;
+  createCategoryGroup(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult>;
+  updateCategoryGroup(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult>;
+  deleteCategoryGroup(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult>;
+  setBudgetCarryover(
+    month: string,
+    categoryId: string,
+    carryover: boolean,
+  ): Promise<void>;
+  holdBudgetForNextMonth(month: string, amount: number): Promise<boolean>;
+  resetBudgetHold(month: string): Promise<void>;
+  createPayee(payee: { name: string }): Promise<{ id: string }>;
+  updatePayee(id: string, fields: { name?: string }): Promise<{ id: string }>;
+  deletePayee(id: string): Promise<{ id: string }>;
+  mergePayees(
+    targetId: string,
+    mergeIds: string[],
+  ): Promise<{ targetId: string; mergedCount: number }>;
+  createAccount(
+    account: { name: string; type: AccountType; offbudget?: boolean },
+    initialBalance?: number,
+  ): Promise<{ id: string }>;
+  updateAccount(
+    id: string,
+    fields: { name?: string; offbudget?: boolean },
+  ): Promise<{ id: string }>;
+  closeAccount(
+    id: string,
+    transferAccountId?: string,
+    transferCategoryId?: string,
+  ): Promise<{ id: string }>;
+  reopenAccount(id: string): Promise<{ id: string }>;
+  runBankSync(accountId?: string): Promise<RunBankSyncResult>;
   executeRead<T>(
     operation: (api: ActualApiAdapter) => Promise<T>,
     options?: { forceSync?: boolean },
@@ -219,6 +310,9 @@ export function createActualBudgetGateway(
   let shuttingDown = false;
   let shutdownPromise: Promise<void> | null = null;
   let queueTail: Promise<void> = Promise.resolve();
+  let cachedCategories: CategoryGroupSummary[] | null = null;
+  let cachedPayees: PayeeSummary[] | null = null;
+  let cachedAccounts: AccountSummary[] | null = null;
 
   function markSynced(): void {
     const currentMs = now();
@@ -243,6 +337,9 @@ export function createActualBudgetGateway(
       await api.sync();
       markSynced();
     }
+    cachedCategories = null;
+    cachedPayees = null;
+    cachedAccounts = null;
   }
 
   async function runInitialize(): Promise<void> {
@@ -310,8 +407,14 @@ export function createActualBudgetGateway(
       }
 
       await runSync();
+      cachedCategories = null;
+      cachedPayees = null;
+      cachedAccounts = null;
       const result = await operation(api);
       await runSync();
+      cachedCategories = null;
+      cachedPayees = null;
+      cachedAccounts = null;
       return result;
     });
   }
@@ -329,6 +432,9 @@ export function createActualBudgetGateway(
       } finally {
         ready = false;
         initialized = false;
+        cachedCategories = null;
+        cachedPayees = null;
+        cachedAccounts = null;
         if (options.signalTarget?.off) {
           options.signalTarget.off('SIGTERM', handleSignal);
           options.signalTarget.off('SIGINT', handleSignal);
@@ -548,6 +654,7 @@ export function createActualBudgetGateway(
           });
         }
 
+        cachedAccounts = summaries;
         return summaries;
       }, readOptions);
     },
@@ -742,6 +849,10 @@ export function createActualBudgetGateway(
     async listCategories(
       readOptions?: { forceSync?: boolean },
     ): Promise<CategoryGroupSummary[]> {
+      if (!readOptions?.forceSync && cachedCategories !== null) {
+        return cachedCategories;
+      }
+
       return executeRead(async (apiAdapter) => {
         const rawGroups = (await apiAdapter.getCategoryGroups?.()) ?? [];
         const needsFallbackCategories = rawGroups.some((g) => !Array.isArray(g.categories));
@@ -750,7 +861,7 @@ export function createActualBudgetGateway(
             ? await apiAdapter.getCategories()
             : [];
 
-        return rawGroups.map((group) => {
+        const result = rawGroups.map((group) => {
           const rawCategories = Array.isArray(group.categories)
             ? group.categories
             : fallbackCategories.filter((c) => c.group_id === group.id);
@@ -770,16 +881,25 @@ export function createActualBudgetGateway(
             categories,
           };
         });
+
+        cachedCategories = result;
+        return result;
       }, readOptions);
     },
     async listPayees(readOptions?: { forceSync?: boolean }): Promise<PayeeSummary[]> {
+      if (!readOptions?.forceSync && cachedPayees !== null) {
+        return cachedPayees;
+      }
+
       return executeRead(async (apiAdapter) => {
         const rawPayees = (await apiAdapter.getPayees?.()) ?? [];
-        return rawPayees.map((payee) => ({
+        const result: PayeeSummary[] = rawPayees.map((payee) => ({
           id: payee.id,
           name: payee.name,
           transfer_acct: payee.transfer_acct ?? null,
         }));
+        cachedPayees = result;
+        return result;
       }, readOptions);
     },
     async listBudgetMonths(readOptions?: { forceSync?: boolean }): Promise<string[]> {
@@ -987,6 +1107,274 @@ export function createActualBudgetGateway(
           categoryId: input.categoryId,
           previous,
           updated,
+        };
+      });
+    },
+    async createCategory(input: CreateCategoryInput): Promise<CreateCategoryResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.createCategory) {
+          throw new Error('createCategory is not supported by the current API adapter');
+        }
+        const id = await apiAdapter.createCategory({
+          name: input.name,
+          group_id: input.groupId,
+          ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
+          ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+        });
+        return { id };
+      });
+    },
+    async updateCategory(input: UpdateCategoryInput): Promise<UpdateCategoryResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.updateCategory) {
+          throw new Error('updateCategory is not supported by the current API adapter');
+        }
+        const fields: Record<string, unknown> = {};
+        if (input.name !== undefined) fields.name = input.name;
+        if (input.groupId !== undefined) fields.group_id = input.groupId;
+        if (input.isIncome !== undefined) fields.is_income = input.isIncome;
+        if (input.hidden !== undefined) fields.hidden = input.hidden;
+        await apiAdapter.updateCategory(input.id, fields);
+        return { id: input.id, success: true };
+      });
+    },
+    async deleteCategory(input: DeleteCategoryInput): Promise<DeleteCategoryResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.deleteCategory) {
+          throw new Error('deleteCategory is not supported by the current API adapter');
+        }
+        await apiAdapter.deleteCategory(input.id, input.transferCategoryId);
+        return { id: input.id, success: true };
+      });
+    },
+    async createCategoryGroup(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.createCategoryGroup) {
+          throw new Error('createCategoryGroup is not supported by the current API adapter');
+        }
+        const id = await apiAdapter.createCategoryGroup({
+          name: input.name,
+          ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
+          ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+        });
+        return { id };
+      });
+    },
+    async updateCategoryGroup(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.updateCategoryGroup) {
+          throw new Error('updateCategoryGroup is not supported by the current API adapter');
+        }
+        const fields: Record<string, unknown> = {};
+        if (input.name !== undefined) fields.name = input.name;
+        if (input.isIncome !== undefined) fields.is_income = input.isIncome;
+        if (input.hidden !== undefined) fields.hidden = input.hidden;
+        await apiAdapter.updateCategoryGroup(input.id, fields);
+        return { id: input.id, success: true };
+      });
+    },
+    async deleteCategoryGroup(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.deleteCategoryGroup) {
+          throw new Error('deleteCategoryGroup is not supported by the current API adapter');
+        }
+        await apiAdapter.deleteCategoryGroup(input.id, input.transferCategoryId);
+        return { id: input.id, success: true };
+      });
+    },
+    async setBudgetCarryover(
+      month: string,
+      categoryId: string,
+      carryover: boolean,
+    ): Promise<void> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.setBudgetCarryover) {
+          throw new Error('setBudgetCarryover is not supported by the current API adapter');
+        }
+        await apiAdapter.setBudgetCarryover(month, categoryId, carryover);
+      });
+    },
+    async holdBudgetForNextMonth(
+      month: string,
+      amount: number,
+    ): Promise<boolean> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.holdBudgetForNextMonth) {
+          throw new Error('holdBudgetForNextMonth is not supported by the current API adapter');
+        }
+        const minorUnits = toMinorUnits(amount);
+        const result = await apiAdapter.holdBudgetForNextMonth(month, minorUnits);
+        return result !== undefined && result !== null ? Boolean(result) : true;
+      });
+    },
+    async resetBudgetHold(month: string): Promise<void> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.resetBudgetHold) {
+          throw new Error('resetBudgetHold is not supported by the current API adapter');
+        }
+        await apiAdapter.resetBudgetHold(month);
+      });
+    },
+    async createPayee(payee: { name: string }): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.createPayee) {
+          throw new Error('createPayee is not supported by the current API adapter');
+        }
+        const id = await apiAdapter.createPayee({ name: payee.name });
+        return { id };
+      });
+    },
+    async updatePayee(id: string, fields: { name?: string }): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.updatePayee) {
+          throw new Error('updatePayee is not supported by the current API adapter');
+        }
+        await apiAdapter.updatePayee(id, fields);
+        return { id };
+      });
+    },
+    async deletePayee(id: string): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.deletePayee) {
+          throw new Error('deletePayee is not supported by the current API adapter');
+        }
+        await apiAdapter.deletePayee(id);
+        return { id };
+      });
+    },
+    async mergePayees(
+      targetId: string,
+      mergeIds: string[],
+    ): Promise<{ targetId: string; mergedCount: number }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.mergePayees) {
+          throw new Error('mergePayees is not supported by the current API adapter');
+        }
+        if (!mergeIds || mergeIds.length === 0) {
+          throw new Error('mergePayees requires at least one source payee ID');
+        }
+        await apiAdapter.mergePayees(targetId, mergeIds);
+        return { targetId, mergedCount: mergeIds.length };
+      });
+    },
+    async createAccount(
+      account: { name: string; type: AccountType; offbudget?: boolean },
+      initialBalance?: number,
+    ): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.createAccount) {
+          throw new Error('createAccount is not supported by the current API adapter');
+        }
+        const minorBalance =
+          initialBalance !== undefined ? toMinorUnits(initialBalance) : undefined;
+        const id = await apiAdapter.createAccount(
+          {
+            name: account.name,
+            type: account.type,
+            ...(account.offbudget !== undefined ? { offbudget: account.offbudget } : {}),
+          },
+          minorBalance,
+        );
+        return { id };
+      });
+    },
+    async updateAccount(
+      id: string,
+      fields: { name?: string; offbudget?: boolean },
+    ): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.updateAccount) {
+          throw new Error('updateAccount is not supported by the current API adapter');
+        }
+        await apiAdapter.updateAccount(id, fields);
+        return { id };
+      });
+    },
+    async closeAccount(
+      id: string,
+      transferAccountId?: string,
+      transferCategoryId?: string,
+    ): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.closeAccount) {
+          throw new Error('closeAccount is not supported by the current API adapter');
+        }
+        if (!transferAccountId) {
+          const balance = await apiAdapter.getAccountBalance(id);
+          if (balance !== 0) {
+            throw new Error(
+              `Cannot close account "${id}" with non-zero balance (${balance}) without specifying transferAccountId.`,
+            );
+          }
+        }
+        await apiAdapter.closeAccount(id, transferAccountId, transferCategoryId);
+        return { id };
+      });
+    },
+    async reopenAccount(id: string): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.reopenAccount) {
+          throw new Error('reopenAccount is not supported by the current API adapter');
+        }
+        await apiAdapter.reopenAccount(id);
+        return { id };
+      });
+    },
+    async runBankSync(accountId?: string): Promise<RunBankSyncResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.runBankSync) {
+          throw new Error('runBankSync is not supported by the current API adapter');
+        }
+        const raw = (await (accountId !== undefined
+          ? apiAdapter.runBankSync({ accountId })
+          : apiAdapter.runBankSync())) as
+          | {
+              updatedAccounts?: string[];
+              updatedAccountIds?: string[];
+              newTransactions?: unknown[];
+              newTransactionsCount?: number;
+              matchedTransactions?: unknown[];
+              matchedTransactionsCount?: number;
+              errors?: unknown[];
+            }
+          | undefined;
+
+        const updatedAccountIds = Array.isArray(raw?.updatedAccountIds)
+          ? raw.updatedAccountIds
+          : Array.isArray(raw?.updatedAccounts)
+            ? raw.updatedAccounts
+                .map((a: unknown) => (typeof a === 'string' ? a : (a as { id: string })?.id))
+                .filter((id): id is string => Boolean(id))
+            : [];
+
+        const newTransactionsCount =
+          typeof raw?.newTransactionsCount === 'number'
+            ? raw.newTransactionsCount
+            : Array.isArray(raw?.newTransactions)
+              ? raw.newTransactions.length
+              : 0;
+
+        const matchedTransactionsCount =
+          typeof raw?.matchedTransactionsCount === 'number'
+            ? raw.matchedTransactionsCount
+            : Array.isArray(raw?.matchedTransactions)
+              ? raw.matchedTransactions.length
+              : 0;
+
+        const errors =
+          Array.isArray(raw?.errors) && raw.errors.length > 0
+            ? raw.errors.map((e) =>
+                typeof e === 'string'
+                  ? e
+                  : String((e as { message?: string })?.message ?? e),
+              )
+            : undefined;
+
+        return {
+          updatedAccountIds,
+          newTransactionsCount,
+          matchedTransactionsCount,
+          ...(errors ? { errors } : {}),
         };
       });
     },

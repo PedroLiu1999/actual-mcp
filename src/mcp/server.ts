@@ -36,7 +36,7 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
   const server = new McpServer(
     {
       name: 'actual-mcp',
-      version: '0.1.0',
+      version: '0.2.0',
       icons,
     },
     {
@@ -623,6 +623,724 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           {
             type: 'text',
             text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'create_category',
+    {
+      title: 'Create Category',
+      description:
+        'Create a new envelope category under an existing category group.',
+      inputSchema: {
+        name: z.string().min(1).describe('Name of the new category.'),
+        groupId: z.string().min(1).describe('Parent category group ID.'),
+        isIncome: z
+          .boolean()
+          .optional()
+          .describe('Whether this category represents an income stream.'),
+        hidden: z
+          .boolean()
+          .optional()
+          .describe('Whether the category should be hidden from active budget views.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.createCategory) {
+        throw new Error(
+          'createCategory is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.createCategory(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'update_category',
+    {
+      title: 'Update Category',
+      description:
+        'Update an existing envelope category (rename, move to a different category group, or toggle income/hidden flags).',
+      inputSchema: {
+        id: z.string().min(1).describe('Target category ID to update.'),
+        name: z.string().min(1).optional().describe('New name for the category.'),
+        groupId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('New parent category group ID to move the category into.'),
+        isIncome: z
+          .boolean()
+          .optional()
+          .describe('Whether this category represents an income stream.'),
+        hidden: z
+          .boolean()
+          .optional()
+          .describe('Whether the category should be hidden from active budget views.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.updateCategory) {
+        throw new Error(
+          'updateCategory is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.updateCategory(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'delete_category',
+    {
+      title: 'Delete Category',
+      description:
+        'Delete an existing envelope category. If the category has historical transactions, transferCategoryId must be provided to reassign them without orphaned records.',
+      inputSchema: {
+        id: z.string().min(1).describe('Target category ID to delete.'),
+        transferCategoryId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Destination category ID to safely reassign historical transactions to before deleting.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.deleteCategory) {
+        throw new Error(
+          'deleteCategory is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.deleteCategory(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'create_category_group',
+    {
+      title: 'Create Category Group',
+      description:
+        'Create a new category group to organize related expense or income envelopes.',
+      inputSchema: {
+        name: z.string().min(1).describe('Name of the new category group.'),
+        isIncome: z
+          .boolean()
+          .optional()
+          .describe('Whether this group holds income categories.'),
+        hidden: z
+          .boolean()
+          .optional()
+          .describe('Whether the category group should be hidden.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.createCategoryGroup) {
+        throw new Error(
+          'createCategoryGroup is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.createCategoryGroup(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'update_category_group',
+    {
+      title: 'Update Category Group',
+      description:
+        'Update an existing category group (rename or toggle income/hidden flags).',
+      inputSchema: {
+        id: z.string().min(1).describe('Target category group ID to update.'),
+        name: z.string().min(1).optional().describe('New name for the category group.'),
+        isIncome: z
+          .boolean()
+          .optional()
+          .describe('Whether this group holds income categories.'),
+        hidden: z
+          .boolean()
+          .optional()
+          .describe('Whether the category group should be hidden.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.updateCategoryGroup) {
+        throw new Error(
+          'updateCategoryGroup is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.updateCategoryGroup(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'delete_category_group',
+    {
+      title: 'Delete Category Group',
+      description:
+        'Delete an existing category group. If any contained categories have transactions, transferCategoryId must be provided to reassign them without orphaned records.',
+      inputSchema: {
+        id: z.string().min(1).describe('Target category group ID to delete.'),
+        transferCategoryId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Destination category ID to reassign transactions from member categories to before deleting the group.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.deleteCategoryGroup) {
+        throw new Error(
+          'deleteCategoryGroup is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.deleteCategoryGroup(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'create_payee',
+    {
+      title: 'Create Payee',
+      description: 'Create a new payee with a name string and return its generated ID.',
+      inputSchema: {
+        name: z.string().min(1).describe('Name of the new payee.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.createPayee) {
+        throw new Error('createPayee is not supported by the configured BudgetGateway');
+      }
+      const result = await budgetGateway.createPayee({ name: args.name });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'update_payee',
+    {
+      title: 'Update Payee',
+      description: 'Update an existing payee name.',
+      inputSchema: {
+        id: z.string().min(1).describe('Target payee ID to update.'),
+        name: z.string().min(1).describe('New name for the payee.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.updatePayee) {
+        throw new Error('updatePayee is not supported by the configured BudgetGateway');
+      }
+      const result = await budgetGateway.updatePayee(args.id, { name: args.name });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'delete_payee',
+    {
+      title: 'Delete Payee',
+      description: 'Delete an existing payee.',
+      inputSchema: {
+        id: z.string().min(1).describe('Target payee ID to delete.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.deletePayee) {
+        throw new Error('deletePayee is not supported by the configured BudgetGateway');
+      }
+      const result = await budgetGateway.deletePayee(args.id);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'merge_payees',
+    {
+      title: 'Merge Payees',
+      description:
+        'Merge one or more duplicate source payees into a canonical target payee, consolidating all transactions and rules under the target payee and removing source records.',
+      inputSchema: {
+        targetPayeeId: z.string().min(1).describe('Canonical target payee ID to keep.'),
+        sourcePayeeIds: z
+          .array(z.string().min(1))
+          .min(1)
+          .describe(
+            'Non-empty array of source payee IDs to merge into target and delete.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.mergePayees) {
+        throw new Error('mergePayees is not supported by the configured BudgetGateway');
+      }
+      const result = await budgetGateway.mergePayees(
+        args.targetPayeeId,
+        args.sourcePayeeIds,
+      );
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'create_account',
+    {
+      title: 'Create Account',
+      description:
+        'Create a new on-budget or off-budget account with a specified type and optional initial balance as a Decimal Amount.',
+      inputSchema: {
+        name: z.string().min(1).describe('Name of the account.'),
+        type: z
+          .enum([
+            'checking',
+            'savings',
+            'credit',
+            'investment',
+            'mortgage',
+            'debt',
+            'other',
+          ])
+          .describe('Type of financial account.'),
+        offbudget: z
+          .boolean()
+          .optional()
+          .describe('Whether the account is off-budget.'),
+        initialBalance: z
+          .number()
+          .finite()
+          .optional()
+          .describe('Optional initial balance expressed as a Decimal Amount (e.g. 1500.50).'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.createAccount) {
+        throw new Error(
+          'createAccount is not supported by the configured BudgetGateway',
+        );
+      }
+      const { name, type, offbudget, initialBalance } = args;
+      const accountInput: { name: string; type: typeof type; offbudget?: boolean } = {
+        name,
+        type,
+      };
+      if (offbudget !== undefined) {
+        accountInput.offbudget = offbudget;
+      }
+      const result = await budgetGateway.createAccount(
+        accountInput,
+        initialBalance,
+      );
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'update_account',
+    {
+      title: 'Update Account',
+      description:
+        'Update an existing account name or toggle its off-budget status.',
+      inputSchema: {
+        id: z.string().min(1).describe('ID of the account to update.'),
+        name: z.string().min(1).optional().describe('New name for the account.'),
+        offbudget: z
+          .boolean()
+          .optional()
+          .describe('Whether the account is off-budget.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.updateAccount) {
+        throw new Error(
+          'updateAccount is not supported by the configured BudgetGateway',
+        );
+      }
+      const { id, name, offbudget } = args;
+      const fields: { name?: string; offbudget?: boolean } = {};
+      if (name !== undefined) fields.name = name;
+      if (offbudget !== undefined) fields.offbudget = offbudget;
+      const result = await budgetGateway.updateAccount(id, fields);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'close_account',
+    {
+      title: 'Close Account',
+      description:
+        'Close an account in the Target Budget, optionally transferring remaining balance to another account and category.',
+      inputSchema: {
+        id: z.string().min(1).describe('ID of the account to close.'),
+        transferAccountId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target account ID to transfer remaining balance to.'),
+        transferCategoryId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Category ID for balance transfer if transferring across budget boundary.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.closeAccount) {
+        throw new Error(
+          'closeAccount is not supported by the configured BudgetGateway',
+        );
+      }
+      const { id, transferAccountId, transferCategoryId } = args;
+      const result = await budgetGateway.closeAccount(
+        id,
+        transferAccountId,
+        transferCategoryId,
+      );
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'reopen_account',
+    {
+      title: 'Reopen Account',
+      description: 'Reopen a previously closed account.',
+      inputSchema: {
+        id: z.string().min(1).describe('ID of the account to reopen.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.reopenAccount) {
+        throw new Error(
+          'reopenAccount is not supported by the configured BudgetGateway',
+        );
+      }
+      const { id } = args;
+      const result = await budgetGateway.reopenAccount(id);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'run_bank_sync',
+    {
+      title: 'Run Bank Sync',
+      description:
+        'Trigger bank synchronization for a specific linked account or all linked accounts when accountId is omitted. Returns updated account IDs, new and matched transaction counts, and any sync errors.',
+      inputSchema: {
+        accountId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Optional account ID to synchronize. When omitted, synchronizes all linked accounts.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.runBankSync) {
+        throw new Error(
+          'runBankSync is not supported by the configured BudgetGateway',
+        );
+      }
+      const result = await budgetGateway.runBankSync(args.accountId);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'set_budget_carryover',
+    {
+      title: 'Set Budget Carryover',
+      description:
+        'Set the carryover flag for a category envelope in a specified budget month (YYYY-MM). When true, overspent category balance rolls over into next month.',
+      inputSchema: {
+        month: budgetMonthSchema.describe(
+          'Target Budget Month in YYYY-MM format (e.g. 2026-11).',
+        ),
+        categoryId: z.string().min(1).describe('Target category UUID.'),
+        carryover: z
+          .boolean()
+          .describe(
+            'Whether to roll over overspending for this category envelope into the following month.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async ({ month, categoryId, carryover }) => {
+      if (!budgetGateway.setBudgetCarryover) {
+        throw new Error(
+          'setBudgetCarryover is not supported by the configured BudgetGateway',
+        );
+      }
+      await budgetGateway.setBudgetCarryover(month, categoryId, carryover);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              { success: true, month, categoryId, carryover },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'hold_budget_for_next_month',
+    {
+      title: 'Hold Budget For Next Month',
+      description:
+        'Hold a specified Decimal Amount from the current month available budget for next month.',
+      inputSchema: {
+        month: budgetMonthSchema.describe(
+          'Target Budget Month in YYYY-MM format (e.g. 2026-11).',
+        ),
+        amount: z
+          .number()
+          .finite()
+          .describe(
+            'Decimal Amount to hold from current month available funds for next month.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async ({ month, amount }) => {
+      if (!budgetGateway.holdBudgetForNextMonth) {
+        throw new Error(
+          'holdBudgetForNextMonth is not supported by the configured BudgetGateway',
+        );
+      }
+      const success = await budgetGateway.holdBudgetForNextMonth(month, amount);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ success, month, amount }, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'reset_budget_hold',
+    {
+      title: 'Reset Budget Hold',
+      description:
+        'Reset the budget hold for a given month, releasing held budget hold funds back to the current month available budget.',
+      inputSchema: {
+        month: budgetMonthSchema.describe(
+          'Target Budget Month in YYYY-MM format (e.g. 2026-11).',
+        ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async ({ month }) => {
+      if (!budgetGateway.resetBudgetHold) {
+        throw new Error(
+          'resetBudgetHold is not supported by the configured BudgetGateway',
+        );
+      }
+      await budgetGateway.resetBudgetHold(month);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ success: true, month }, null, 2),
           },
         ],
       };

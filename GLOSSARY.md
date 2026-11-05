@@ -30,6 +30,18 @@ _Avoid_: Background poll, auto-sync
 A monthly envelope allocation record (`YYYY-MM`) containing per-category budgeted amounts, spent amounts, carryover flags, and remaining balances.
 _Avoid_: Monthly plan, budget period
 
+**Budget Carryover**:
+A configuration flag per category envelope indicating whether an overspent balance in a Budget Month rolls over into the next month's category balance rather than being deducted from the next month's overall available funds.
+_Avoid_: Debt rollover, deficit carry
+
+**Budget Hold**:
+An explicit currency amount set aside from the current month's available funds to be held and released as available funds in the subsequent Budget Month.
+_Avoid_: Buffer, reserve
+
+**Bank Sync**:
+The synchronization mechanism that pulls and reconciles external financial institution transactions directly into linked accounts within the Target Budget.
+_Avoid_: Direct connect, feed pull
+
 ### Money & Transactions
 
 **Decimal Amount**:

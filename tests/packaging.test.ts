@@ -86,7 +86,7 @@ describe('Packaging & deployment artifacts', () => {
     expect(compose).toContain('http://127.0.0.1:3000/healthz');
   });
 
-  it('documents architecture, all 12 MCP tools, all environment variables, VPS deployment (actual-server + cloudflared), and Google Gemini connection steps in README.md', () => {
+  it('documents architecture, all 30 MCP tools, all environment variables, VPS deployment (actual-server + cloudflared), and Google Gemini connection steps in README.md', () => {
     const readmePath = path.join(repoRoot, 'README.md');
     const readme = fs.readFileSync(readmePath, 'utf8');
 
@@ -103,10 +103,29 @@ describe('Packaging & deployment artifacts', () => {
       'update_transaction',
       'delete_transaction',
       'set_budget_amount',
+      'create_category',
+      'update_category',
+      'delete_category',
+      'create_category_group',
+      'update_category_group',
+      'delete_category_group',
+      'create_payee',
+      'update_payee',
+      'delete_payee',
+      'merge_payees',
+      'create_account',
+      'update_account',
+      'close_account',
+      'reopen_account',
+      'run_bank_sync',
+      'set_budget_carryover',
+      'hold_budget_for_next_month',
+      'reset_budget_hold',
     ];
     for (const tool of expectedTools) {
       expect(readme).toContain(tool);
     }
+    expect(readme).toContain('all 30 MCP tools');
 
     const expectedEnvVars = [
       'PUBLIC_URL',
@@ -131,5 +150,13 @@ describe('Packaging & deployment artifacts', () => {
     expect(readme).toContain('Connect to an MCP server');
     expect(readme).toContain('Client ID');
     expect(readme).toContain('Client Secret');
+  });
+
+  it('aligns version across package.json and src/mcp/server.ts to 0.2.0', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+    expect(pkg.version).toBe('0.2.0');
+
+    const serverCode = fs.readFileSync(path.join(repoRoot, 'src/mcp/server.ts'), 'utf8');
+    expect(serverCode).toContain("version: '0.2.0'");
   });
 });

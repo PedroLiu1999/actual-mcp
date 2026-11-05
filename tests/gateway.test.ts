@@ -1280,16 +1280,31 @@ describe('BudgetGateway seam — category and category group mutations & cache i
     const updateRes = await gateway.updateAccount!('acct-new-1', {
       name: 'Primary Credit Card',
       offbudget: true,
-      closed: false,
     });
     expect(updateRes).toEqual({ id: 'acct-new-1' });
     expect(events).toEqual([
       'api:sync',
-      'api:updateAccount:acct-new-1:{"name":"Primary Credit Card","offbudget":true,"closed":false}',
+      'api:updateAccount:acct-new-1:{"name":"Primary Credit Card","offbudget":true}',
       'api:sync',
     ]);
 
-    // 4. closeAccount forwards balance transfer targets
+    // 4. closeAccount rejects closing an account with non-zero balance without transferAccountId
+    await expect(gateway.closeAccount!('acct-new-1')).rejects.toThrow(
+      'Cannot close account "acct-new-1" with non-zero balance (100000) without specifying transferAccountId.',
+    );
+
+    // closeAccount succeeds when balance is 0 without transferAccountId
+    fakeApi.getAccountBalance = async () => 0;
+    events.length = 0;
+    const closeZeroRes = await gateway.closeAccount!('acct-new-1');
+    expect(closeZeroRes).toEqual({ id: 'acct-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:closeAccount:acct-new-1:none:none',
+      'api:sync',
+    ]);
+
+    // closeAccount forwards balance transfer targets when specified
     events.length = 0;
     const closeRes = await gateway.closeAccount!(
       'acct-new-1',
@@ -1691,6 +1706,38 @@ describe('BudgetGateway seam — category and category group mutations & cache i
       await expect(gateway.runBankSync!()).rejects.toThrow(
         'runBankSync is not supported by the current API adapter',
       );
+    });
+
+    it('maps raw.updatedAccounts properly without false fallback to [accountId]', async () => {
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {},
+        runBankSync: async () => {
+          return {
+            updatedAccounts: ['acct-mapped-1'],
+            newTransactionsCount: 1,
+            matchedTransactionsCount: 0,
+          };
+        },
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      const result = await gateway.runBankSync!('acct-not-updated');
+      expect(result.updatedAccountIds).toEqual(['acct-mapped-1']);
+
+      // When raw has empty updatedAccounts, it returns empty array without falling back to [accountId]
+      fakeApi.runBankSync = async () => ({
+        updatedAccounts: [],
+        newTransactionsCount: 0,
+        matchedTransactionsCount: 0,
+      });
+      const emptyResult = await gateway.runBankSync!('acct-not-updated');
+      expect(emptyResult.updatedAccountIds).toEqual([]);
     });
   });
 });

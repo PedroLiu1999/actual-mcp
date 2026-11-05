@@ -75,9 +75,9 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 
 ---
 
-## MCP Tools Reference (all 26 MCP tools & extended lifecycle capabilities)
+## MCP Tools Reference (all 30 MCP tools & extended lifecycle capabilities)
 
-`actual-mcp` v0.2.0 documents and provides all 26 MCP tools across Categories, Payees, Accounts, Bank Sync, and Budget Adjustments (30 total registered tools including category group operations). All tools return structured JSON serialized in MCP text content blocks and include MCP safety annotations (`readOnlyHint`, `destructiveHint`).
+`actual-mcp` v0.2.0 documents and provides all 30 MCP tools (8 read, 22 write across Categories, Category Groups, Payees, Accounts, Bank Sync, and Budget Adjustments). All tools return structured JSON serialized in MCP text content blocks and include MCP safety annotations (`readOnlyHint`, `destructiveHint`).
 
 ### Read Tools (`readOnlyHint: true`, `destructiveHint: false`)
 
@@ -128,7 +128,7 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
 | `create_account` | `false` | Create a new on-budget or off-budget account with a specified type and optional initial balance in **Decimal Amount**. Returns `{ id }`. | `name` (`string`, min 1, required), `type` (`'checking' \| 'savings' \| 'credit' \| 'investment' \| 'mortgage' \| 'debt' \| 'other'`, required), `offbudget?` (`boolean`), `initialBalance?` (`number`, finite Decimal Amount) |
-| `update_account` | `false` | Update an existing account name, toggle its off-budget status, or toggle its closed flag. | `id` (`string`, min 1, required), `name?` (`string`), `offbudget?` (`boolean`), `closed?` (`boolean`) |
+| `update_account` | `false` | Update an existing account name or toggle its off-budget status. | `id` (`string`, min 1, required), `name?` (`string`), `offbudget?` (`boolean`) |
 | `close_account` | `true` | Close an account in the Target Budget, optionally transferring remaining balance to another account and category. | `id` (`string`, min 1, required), `transferAccountId?` (`string`), `transferCategoryId?` (`string`) |
 | `reopen_account` | `false` | Reopen a previously closed account. | `id` (`string`, min 1, required) |
 
@@ -143,8 +143,8 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
 | `set_budget_carryover` | `false` | Set the carryover flag for a category envelope in a specified budget month (`YYYY-MM`). When true, overspent category balance rolls over into the next month. | `month` (`YYYY-MM`, required), `categoryId` (`string`, min 1, required), `carryover` (`boolean`, required) |
-| `hold_budget_for_next_month` | `false` | Hold a specified **Decimal Amount** from the current month available budget to buffer next month. | `month` (`YYYY-MM`, required), `amount` (`number`, finite Decimal Amount, required) |
-| `reset_budget_hold` | `false` | Reset the budget hold for a given month, releasing any held reserve funds back to the current month available budget. | `month` (`YYYY-MM`, required) |
+| `hold_budget_for_next_month` | `false` | Hold a specified **Decimal Amount** from the current month available budget for next month. | `month` (`YYYY-MM`, required), `amount` (`number`, finite Decimal Amount, required) |
+| `reset_budget_hold` | `false` | Reset the budget hold for a given month, releasing held budget hold funds back to the current month available budget. | `month` (`YYYY-MM`, required) |
 
 ---
 

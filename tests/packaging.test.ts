@@ -86,7 +86,7 @@ describe('Packaging & deployment artifacts', () => {
     expect(compose).toContain('http://127.0.0.1:3000/healthz');
   });
 
-  it('documents architecture, all 26 MCP tools, all environment variables, VPS deployment (actual-server + cloudflared), and Google Gemini connection steps in README.md', () => {
+  it('documents architecture, all 30 MCP tools, all environment variables, VPS deployment (actual-server + cloudflared), and Google Gemini connection steps in README.md', () => {
     const readmePath = path.join(repoRoot, 'README.md');
     const readme = fs.readFileSync(readmePath, 'utf8');
 
@@ -125,7 +125,7 @@ describe('Packaging & deployment artifacts', () => {
     for (const tool of expectedTools) {
       expect(readme).toContain(tool);
     }
-    expect(readme).toContain('all 26 MCP tools');
+    expect(readme).toContain('all 30 MCP tools');
 
     const expectedEnvVars = [
       'PUBLIC_URL',

@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="docs/assets/logo/dist/actual-mcp-horizontal.svg" alt="actual-mcp logo" width="460">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo/dist/actual-mcp-horizontal-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo/dist/actual-mcp-horizontal.svg">
+    <img alt="actual-mcp logo" src="docs/assets/logo/dist/actual-mcp-horizontal.svg" width="460">
+  </picture>
 </p>
 
 # actual-mcp

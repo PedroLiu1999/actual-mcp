@@ -5,8 +5,16 @@
     .word-sep { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 46px; font-weight: 300; fill: #6B46C1; }
     .word-mcp { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 46px; font-weight: 800; fill: #6B46C1; }
     .sub { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 11px; font-weight: 600; fill: #64748B; letter-spacing: 2.5px; text-transform: uppercase; text-anchor: middle; }
+    .symbol-mark { fill: #6B46C1; }
+    @media (prefers-color-scheme: dark) {
+      .word-actual { fill: #F8FAFC; }
+      .word-sep { fill: #A78BFA; }
+      .word-mcp { fill: #A78BFA; }
+      .symbol-mark { fill: #A78BFA; }
+      .sub { fill: #94A3B8; }
+    }
   </style>
-  <g id="symbol" transform="translate(60, 20) scale(0.78)" fill="#6B46C1">
+  <g id="symbol" class="symbol-mark" transform="translate(60, 20) scale(0.78)">
     <!-- Base A-frame -->
     <path fill-rule="evenodd" d="
       M 39.6 219.5

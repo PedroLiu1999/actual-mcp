@@ -34,7 +34,7 @@ const configSchema = z.object({
   OAUTH_ADMIN_PASSWORD: nonEmptyString,
   OAUTH_ALLOWED_REDIRECT_URIS: z
     .string()
-    .optional()
+    .default('http://localhost,http://127.0.0.1')
     .transform((raw) => {
       if (!raw || raw.trim() === '') return ['http://localhost', 'http://127.0.0.1'];
       return raw
@@ -42,7 +42,6 @@ const configSchema = z.object({
         .map((s) => s.trim())
         .filter(Boolean);
     })
-    .default('http://localhost,http://127.0.0.1')
     .pipe(z.array(redirectUriSchema)),
   ACTUAL_SERVER_URL: z
     .string()

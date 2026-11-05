@@ -4,12 +4,12 @@
 
 **Blocked by:** 01: Category and Category Group Management Tools
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `create_account` accepts `name`, `type` (validated enum: `checking`, `savings`, `credit`, `investment`, `mortgage`, `debt`, `other`), optional `offbudget` boolean, and optional `initialBalance` as a Decimal Amount.
-- [ ] Initial balance is converted accurately from Decimal Amount to Minor Unit Amount integers before dispatching to the engine.
-- [ ] `update_account` allows updating `name`, `offbudget`, or `closed` flags on an account.
-- [ ] `close_account` accepts `id`, optional `transferAccountId`, and optional `transferCategoryId`, annotated with `destructiveHint: true`.
-- [ ] `reopen_account` accepts `id` and re-activates a previously closed account.
-- [ ] All account lifecycle mutations trigger upstream Coalesced Sync and invalidate cached account listings.
-- [ ] End-to-end HTTP integration tests pass exercising account creation, update, close, and reopen via JSON-RPC `tools/call`.
+- [x] `create_account` accepts `name`, `type` (validated enum: `checking`, `savings`, `credit`, `investment`, `mortgage`, `debt`, `other`), optional `offbudget` boolean, and optional `initialBalance` as a Decimal Amount.
+- [x] Initial balance is converted accurately from Decimal Amount to Minor Unit Amount integers before dispatching to the engine.
+- [x] `update_account` allows updating `name`, `offbudget`, or `closed` flags on an account.
+- [x] `close_account` accepts `id`, optional `transferAccountId`, and optional `transferCategoryId`, annotated with `destructiveHint: true`.
+- [x] `reopen_account` accepts `id` and re-activates a previously closed account.
+- [x] All account lifecycle mutations trigger upstream Coalesced Sync and invalidate cached account listings.
+- [x] End-to-end HTTP integration tests pass exercising account creation, update, close, and reopen via JSON-RPC `tools/call`.

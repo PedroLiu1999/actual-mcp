@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import * as actualApi from '@actual-app/api';
-import { decimalToMinorAmount, minorToDecimalAmount } from '../currency.js';
+import { decimalToMinorAmount, minorToDecimalAmount, toMinorUnits } from '../currency.js';
 import {
   collectMonetaryKeys,
   compileStructuredAqlQuery,
@@ -11,6 +11,7 @@ import {
 } from './aql.js';
 import type {
   AccountSummary,
+  AccountType,
   BudgetGateway,
   BudgetMonthCategoryGroupSummary,
   BudgetMonthCategorySummary,
@@ -189,6 +190,20 @@ export interface ActualApiAdapter {
     fields: Record<string, unknown>,
   ): Promise<unknown>;
   deleteCategoryGroup?(id: string, transferCategoryId?: string): Promise<unknown>;
+  createAccount?(
+    account: { name: string; type?: string; offbudget?: boolean },
+    initialBalance?: number,
+  ): Promise<string>;
+  updateAccount?(
+    id: string,
+    fields: { name?: string; offbudget?: boolean; closed?: boolean },
+  ): Promise<unknown>;
+  closeAccount?(
+    id: string,
+    transferAccountId?: string,
+    transferCategoryId?: string,
+  ): Promise<unknown>;
+  reopenAccount?(id: string): Promise<unknown>;
   q?: typeof actualApi.q;
   aqlQuery?(query: ReturnType<typeof actualApi.q>): Promise<unknown>;
 }
@@ -232,6 +247,20 @@ export interface ActualBudgetGateway extends BudgetGateway {
   createCategoryGroup(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult>;
   updateCategoryGroup(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult>;
   deleteCategoryGroup(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult>;
+  createAccount(
+    account: { name: string; type: AccountType; offbudget?: boolean },
+    initialBalance?: number,
+  ): Promise<{ id: string }>;
+  updateAccount(
+    id: string,
+    fields: { name?: string; offbudget?: boolean; closed?: boolean },
+  ): Promise<{ id: string }>;
+  closeAccount(
+    id: string,
+    transferAccountId?: string,
+    transferCategoryId?: string,
+  ): Promise<{ id: string }>;
+  reopenAccount(id: string): Promise<{ id: string }>;
   executeRead<T>(
     operation: (api: ActualApiAdapter) => Promise<T>,
     options?: { forceSync?: boolean },
@@ -259,6 +288,7 @@ export function createActualBudgetGateway(
   let shutdownPromise: Promise<void> | null = null;
   let queueTail: Promise<void> = Promise.resolve();
   let cachedCategories: CategoryGroupSummary[] | null = null;
+  let cachedAccounts: AccountSummary[] | null = null;
 
   function markSynced(): void {
     const currentMs = now();
@@ -284,6 +314,7 @@ export function createActualBudgetGateway(
       markSynced();
     }
     cachedCategories = null;
+    cachedAccounts = null;
   }
 
   async function runInitialize(): Promise<void> {
@@ -354,6 +385,7 @@ export function createActualBudgetGateway(
       const result = await operation(api);
       await runSync();
       cachedCategories = null;
+      cachedAccounts = null;
       return result;
     });
   }
@@ -372,6 +404,7 @@ export function createActualBudgetGateway(
         ready = false;
         initialized = false;
         cachedCategories = null;
+        cachedAccounts = null;
         if (options.signalTarget?.off) {
           options.signalTarget.off('SIGTERM', handleSignal);
           options.signalTarget.off('SIGINT', handleSignal);
@@ -591,6 +624,7 @@ export function createActualBudgetGateway(
           });
         }
 
+        cachedAccounts = summaries;
         return summaries;
       }, readOptions);
     },
@@ -1116,6 +1150,65 @@ export function createActualBudgetGateway(
         await apiAdapter.deleteCategoryGroup(input.id, input.transferCategoryId);
         cachedCategories = null;
         return { id: input.id, success: true };
+      });
+    },
+    async createAccount(
+      account: { name: string; type: AccountType; offbudget?: boolean },
+      initialBalance?: number,
+    ): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.createAccount) {
+          throw new Error('createAccount is not supported by the current API adapter');
+        }
+        const minorBalance =
+          initialBalance !== undefined ? toMinorUnits(initialBalance) : undefined;
+        const id = await apiAdapter.createAccount(
+          {
+            name: account.name,
+            type: account.type,
+            ...(account.offbudget !== undefined ? { offbudget: account.offbudget } : {}),
+          },
+          minorBalance,
+        );
+        cachedAccounts = null;
+        return { id };
+      });
+    },
+    async updateAccount(
+      id: string,
+      fields: { name?: string; offbudget?: boolean; closed?: boolean },
+    ): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.updateAccount) {
+          throw new Error('updateAccount is not supported by the current API adapter');
+        }
+        await apiAdapter.updateAccount(id, fields);
+        cachedAccounts = null;
+        return { id };
+      });
+    },
+    async closeAccount(
+      id: string,
+      transferAccountId?: string,
+      transferCategoryId?: string,
+    ): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.closeAccount) {
+          throw new Error('closeAccount is not supported by the current API adapter');
+        }
+        await apiAdapter.closeAccount(id, transferAccountId, transferCategoryId);
+        cachedAccounts = null;
+        return { id };
+      });
+    },
+    async reopenAccount(id: string): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.reopenAccount) {
+          throw new Error('reopenAccount is not supported by the current API adapter');
+        }
+        await apiAdapter.reopenAccount(id);
+        cachedAccounts = null;
+        return { id };
       });
     },
   };

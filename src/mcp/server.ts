@@ -881,5 +881,193 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     },
   );
 
+  server.registerTool(
+    'create_account',
+    {
+      title: 'Create Account',
+      description:
+        'Create a new on-budget or off-budget account with a specified type and optional initial balance as a Decimal Amount.',
+      inputSchema: {
+        name: z.string().min(1).describe('Name of the account.'),
+        type: z
+          .enum([
+            'checking',
+            'savings',
+            'credit',
+            'investment',
+            'mortgage',
+            'debt',
+            'other',
+          ])
+          .describe('Type of financial account.'),
+        offbudget: z
+          .boolean()
+          .optional()
+          .describe('Whether the account is off-budget.'),
+        initialBalance: z
+          .number()
+          .finite()
+          .optional()
+          .describe('Optional initial balance expressed as a Decimal Amount (e.g. 1500.50).'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.createAccount) {
+        throw new Error(
+          'createAccount is not supported by the configured BudgetGateway',
+        );
+      }
+      const { name, type, offbudget, initialBalance } = args;
+      const accountInput: { name: string; type: typeof type; offbudget?: boolean } = {
+        name,
+        type,
+      };
+      if (offbudget !== undefined) {
+        accountInput.offbudget = offbudget;
+      }
+      const result = await budgetGateway.createAccount(
+        accountInput,
+        initialBalance,
+      );
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'update_account',
+    {
+      title: 'Update Account',
+      description:
+        'Update an existing account name, toggle its off-budget status, or toggle its closed flag.',
+      inputSchema: {
+        id: z.string().min(1).describe('ID of the account to update.'),
+        name: z.string().min(1).optional().describe('New name for the account.'),
+        offbudget: z
+          .boolean()
+          .optional()
+          .describe('Whether the account is off-budget.'),
+        closed: z
+          .boolean()
+          .optional()
+          .describe('Whether the account is closed.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.updateAccount) {
+        throw new Error(
+          'updateAccount is not supported by the configured BudgetGateway',
+        );
+      }
+      const { id, name, offbudget, closed } = args;
+      const fields: { name?: string; offbudget?: boolean; closed?: boolean } = {};
+      if (name !== undefined) fields.name = name;
+      if (offbudget !== undefined) fields.offbudget = offbudget;
+      if (closed !== undefined) fields.closed = closed;
+      const result = await budgetGateway.updateAccount(id, fields);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'close_account',
+    {
+      title: 'Close Account',
+      description:
+        'Close an account in the Target Budget, optionally transferring remaining balance to another account and category.',
+      inputSchema: {
+        id: z.string().min(1).describe('ID of the account to close.'),
+        transferAccountId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target account ID to transfer remaining balance to.'),
+        transferCategoryId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Category ID for balance transfer if transferring across budget boundary.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.closeAccount) {
+        throw new Error(
+          'closeAccount is not supported by the configured BudgetGateway',
+        );
+      }
+      const { id, transferAccountId, transferCategoryId } = args;
+      const result = await budgetGateway.closeAccount(
+        id,
+        transferAccountId,
+        transferCategoryId,
+      );
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'reopen_account',
+    {
+      title: 'Reopen Account',
+      description: 'Reopen a previously closed account.',
+      inputSchema: {
+        id: z.string().min(1).describe('ID of the account to reopen.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.reopenAccount) {
+        throw new Error(
+          'reopenAccount is not supported by the configured BudgetGateway',
+        );
+      }
+      const { id } = args;
+      const result = await budgetGateway.reopenAccount(id);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
   return server;
 }

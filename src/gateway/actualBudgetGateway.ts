@@ -1182,7 +1182,6 @@ export function createActualBudgetGateway(
         return { id: input.id, success: true };
       });
     },
-<<<<<<< HEAD
     async setBudgetCarryover(
       month: string,
       categoryId: string,

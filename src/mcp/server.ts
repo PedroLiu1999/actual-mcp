@@ -882,7 +882,6 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
   );
 
   server.registerTool(
-<<<<<<< HEAD
     'create_payee',
     {
       title: 'Create Payee',

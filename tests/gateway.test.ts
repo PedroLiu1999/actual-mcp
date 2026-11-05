@@ -1582,7 +1582,6 @@ describe('BudgetGateway seam — category and category group mutations & cache i
       ).rejects.toThrow('resetBudgetHold is not supported by the current API adapter');
     });
   });
-  });
 });
 
 

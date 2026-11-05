@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import * as actualApi from '@actual-app/api';
-import { decimalToMinorAmount, minorToDecimalAmount } from '../currency.js';
+import { decimalToMinorAmount, minorToDecimalAmount, toMinorUnits } from '../currency.js';
 import {
   collectMonetaryKeys,
   compileStructuredAqlQuery,
@@ -168,6 +168,8 @@ export interface ActualApiAdapter {
   deleteTransaction?(id: string): Promise<unknown>;
   setBudgetAmount?(month: string, categoryId: string, value: number): Promise<void>;
   setBudgetCarryover?(month: string, categoryId: string, flag: boolean): Promise<void>;
+  holdBudgetForNextMonth?(month: string, amount: number): Promise<unknown>;
+  resetBudgetHold?(month: string): Promise<unknown>;
   createCategory?(category: {
     name: string;
     group_id: string;
@@ -232,6 +234,13 @@ export interface ActualBudgetGateway extends BudgetGateway {
   createCategoryGroup(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult>;
   updateCategoryGroup(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult>;
   deleteCategoryGroup(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult>;
+  setBudgetCarryover(
+    month: string,
+    categoryId: string,
+    carryover: boolean,
+  ): Promise<void>;
+  holdBudgetForNextMonth(month: string, amount: number): Promise<boolean>;
+  resetBudgetHold(month: string): Promise<void>;
   executeRead<T>(
     operation: (api: ActualApiAdapter) => Promise<T>,
     options?: { forceSync?: boolean },
@@ -1116,6 +1125,39 @@ export function createActualBudgetGateway(
         await apiAdapter.deleteCategoryGroup(input.id, input.transferCategoryId);
         cachedCategories = null;
         return { id: input.id, success: true };
+      });
+    },
+    async setBudgetCarryover(
+      month: string,
+      categoryId: string,
+      carryover: boolean,
+    ): Promise<void> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.setBudgetCarryover) {
+          throw new Error('setBudgetCarryover is not supported by the current API adapter');
+        }
+        await apiAdapter.setBudgetCarryover(month, categoryId, carryover);
+      });
+    },
+    async holdBudgetForNextMonth(
+      month: string,
+      amount: number,
+    ): Promise<boolean> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.holdBudgetForNextMonth) {
+          throw new Error('holdBudgetForNextMonth is not supported by the current API adapter');
+        }
+        const minorUnits = toMinorUnits(amount);
+        const result = await apiAdapter.holdBudgetForNextMonth(month, minorUnits);
+        return result !== undefined && result !== null ? Boolean(result) : true;
+      });
+    },
+    async resetBudgetHold(month: string): Promise<void> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.resetBudgetHold) {
+          throw new Error('resetBudgetHold is not supported by the current API adapter');
+        }
+        await apiAdapter.resetBudgetHold(month);
       });
     },
   };

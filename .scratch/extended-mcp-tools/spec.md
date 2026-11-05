@@ -37,7 +37,7 @@ All new tools maintain strict adherence to the **Decimal Amount** standard at th
 18. As a budgeting user, I want to trigger bank synchronization across all linked accounts simultaneously, so that my entire budget reflects the latest cleared bank activity.
 19. As a budgeting user, I want the bank sync tool to return counts of new transactions, matched transactions, and updated accounts, so that the conversational agent can give me a concise reconciliation summary.
 20. As a budgeting user, I want to toggle budget carryover on a category for a specific month, so that an overspent balance rolls over into that category's envelope next month instead of reducing the general available funds pool.
-21. As a budgeting user, I want to hold a specified Decimal Amount from the current month's available funds for next month, so that I can plan ahead and buffer next month's income.
+21. As a budgeting user, I want to hold a specified Decimal Amount from the current month's available funds for next month, so that I can plan ahead and hold funds for next month.
 22. As a budgeting user, I want to reset the budget hold for a month, so that held funds are immediately restored to the current month's available budget.
 23. As an LLM agent, I want destructive operations like deleting categories, closing accounts, and merging payees to carry clear destructive annotations, so that I can request user confirmation before proceeding with irreversible actions.
 24. As an LLM agent, I want clear, structured validation errors when required destination IDs are missing during deletions, so that I can prompt the user for the necessary reassignments.
@@ -70,6 +70,6 @@ All new tools maintain strict adherence to the **Decimal Amount** standard at th
 
 ## Further Notes
 
-- The 14 new tools expand the MCP tool catalog from 12 to 26 tools.
+- The 18 new tools (6 category/group, 4 payee, 5 account/sync, 3 budget flow) expand the MCP tool catalog from 12 to 30 tools (8 read, 22 write).
 - All tools adhere to camelCase/snake_case tool naming conventions established in v0.1.0 (snake_case tool names, camelCase argument keys).
 - The changes require no database schema migrations as `@actual-app/api` manages internal SQLite structures natively.

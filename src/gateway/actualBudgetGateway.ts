@@ -203,7 +203,7 @@ export interface ActualApiAdapter {
   ): Promise<string>;
   updateAccount?(
     id: string,
-    fields: { name?: string; offbudget?: boolean; closed?: boolean },
+    fields: { name?: string; offbudget?: boolean },
   ): Promise<unknown>;
   closeAccount?(
     id: string,
@@ -275,7 +275,7 @@ export interface ActualBudgetGateway extends BudgetGateway {
   ): Promise<{ id: string }>;
   updateAccount(
     id: string,
-    fields: { name?: string; offbudget?: boolean; closed?: boolean },
+    fields: { name?: string; offbudget?: boolean },
   ): Promise<{ id: string }>;
   closeAccount(
     id: string,
@@ -407,6 +407,9 @@ export function createActualBudgetGateway(
       }
 
       await runSync();
+      cachedCategories = null;
+      cachedPayees = null;
+      cachedAccounts = null;
       const result = await operation(api);
       await runSync();
       cachedCategories = null;
@@ -1118,7 +1121,6 @@ export function createActualBudgetGateway(
           ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
           ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
         });
-        cachedCategories = null;
         return { id };
       });
     },
@@ -1133,7 +1135,6 @@ export function createActualBudgetGateway(
         if (input.isIncome !== undefined) fields.is_income = input.isIncome;
         if (input.hidden !== undefined) fields.hidden = input.hidden;
         await apiAdapter.updateCategory(input.id, fields);
-        cachedCategories = null;
         return { id: input.id, success: true };
       });
     },
@@ -1143,7 +1144,6 @@ export function createActualBudgetGateway(
           throw new Error('deleteCategory is not supported by the current API adapter');
         }
         await apiAdapter.deleteCategory(input.id, input.transferCategoryId);
-        cachedCategories = null;
         return { id: input.id, success: true };
       });
     },
@@ -1157,7 +1157,6 @@ export function createActualBudgetGateway(
           ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
           ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
         });
-        cachedCategories = null;
         return { id };
       });
     },
@@ -1171,7 +1170,6 @@ export function createActualBudgetGateway(
         if (input.isIncome !== undefined) fields.is_income = input.isIncome;
         if (input.hidden !== undefined) fields.hidden = input.hidden;
         await apiAdapter.updateCategoryGroup(input.id, fields);
-        cachedCategories = null;
         return { id: input.id, success: true };
       });
     },
@@ -1181,7 +1179,6 @@ export function createActualBudgetGateway(
           throw new Error('deleteCategoryGroup is not supported by the current API adapter');
         }
         await apiAdapter.deleteCategoryGroup(input.id, input.transferCategoryId);
-        cachedCategories = null;
         return { id: input.id, success: true };
       });
     },
@@ -1224,7 +1221,6 @@ export function createActualBudgetGateway(
           throw new Error('createPayee is not supported by the current API adapter');
         }
         const id = await apiAdapter.createPayee({ name: payee.name });
-        cachedPayees = null;
         return { id };
       });
     },
@@ -1234,7 +1230,6 @@ export function createActualBudgetGateway(
           throw new Error('updatePayee is not supported by the current API adapter');
         }
         await apiAdapter.updatePayee(id, fields);
-        cachedPayees = null;
         return { id };
       });
     },
@@ -1244,7 +1239,6 @@ export function createActualBudgetGateway(
           throw new Error('deletePayee is not supported by the current API adapter');
         }
         await apiAdapter.deletePayee(id);
-        cachedPayees = null;
         return { id };
       });
     },
@@ -1260,7 +1254,6 @@ export function createActualBudgetGateway(
           throw new Error('mergePayees requires at least one source payee ID');
         }
         await apiAdapter.mergePayees(targetId, mergeIds);
-        cachedPayees = null;
         return { targetId, mergedCount: mergeIds.length };
       });
     },
@@ -1282,20 +1275,18 @@ export function createActualBudgetGateway(
           },
           minorBalance,
         );
-        cachedAccounts = null;
         return { id };
       });
     },
     async updateAccount(
       id: string,
-      fields: { name?: string; offbudget?: boolean; closed?: boolean },
+      fields: { name?: string; offbudget?: boolean },
     ): Promise<{ id: string }> {
       return executeWrite(async (apiAdapter) => {
         if (!apiAdapter.updateAccount) {
           throw new Error('updateAccount is not supported by the current API adapter');
         }
         await apiAdapter.updateAccount(id, fields);
-        cachedAccounts = null;
         return { id };
       });
     },
@@ -1308,8 +1299,15 @@ export function createActualBudgetGateway(
         if (!apiAdapter.closeAccount) {
           throw new Error('closeAccount is not supported by the current API adapter');
         }
+        if (!transferAccountId) {
+          const balance = await apiAdapter.getAccountBalance(id);
+          if (balance !== 0) {
+            throw new Error(
+              `Cannot close account "${id}" with non-zero balance (${balance}) without specifying transferAccountId.`,
+            );
+          }
+        }
         await apiAdapter.closeAccount(id, transferAccountId, transferCategoryId);
-        cachedAccounts = null;
         return { id };
       });
     },
@@ -1319,7 +1317,6 @@ export function createActualBudgetGateway(
           throw new Error('reopenAccount is not supported by the current API adapter');
         }
         await apiAdapter.reopenAccount(id);
-        cachedAccounts = null;
         return { id };
       });
     },
@@ -1342,14 +1339,13 @@ export function createActualBudgetGateway(
             }
           | undefined;
 
-        cachedAccounts = null;
-        cachedCategories = null;
-        cachedPayees = null;
-
-        const updatedAccountIds =
-          raw?.updatedAccountIds ??
-          raw?.updatedAccounts ??
-          (accountId ? [accountId] : []);
+        const updatedAccountIds = Array.isArray(raw?.updatedAccountIds)
+          ? raw.updatedAccountIds
+          : Array.isArray(raw?.updatedAccounts)
+            ? raw.updatedAccounts
+                .map((a: unknown) => (typeof a === 'string' ? a : (a as { id: string })?.id))
+                .filter((id): id is string => Boolean(id))
+            : [];
 
         const newTransactionsCount =
           typeof raw?.newTransactionsCount === 'number'

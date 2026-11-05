@@ -1076,7 +1076,7 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     {
       title: 'Update Account',
       description:
-        'Update an existing account name, toggle its off-budget status, or toggle its closed flag.',
+        'Update an existing account name or toggle its off-budget status.',
       inputSchema: {
         id: z.string().min(1).describe('ID of the account to update.'),
         name: z.string().min(1).optional().describe('New name for the account.'),
@@ -1084,10 +1084,6 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           .boolean()
           .optional()
           .describe('Whether the account is off-budget.'),
-        closed: z
-          .boolean()
-          .optional()
-          .describe('Whether the account is closed.'),
       },
       annotations: {
         readOnlyHint: false,
@@ -1100,11 +1096,10 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           'updateAccount is not supported by the configured BudgetGateway',
         );
       }
-      const { id, name, offbudget, closed } = args;
-      const fields: { name?: string; offbudget?: boolean; closed?: boolean } = {};
+      const { id, name, offbudget } = args;
+      const fields: { name?: string; offbudget?: boolean } = {};
       if (name !== undefined) fields.name = name;
       if (offbudget !== undefined) fields.offbudget = offbudget;
-      if (closed !== undefined) fields.closed = closed;
       const result = await budgetGateway.updateAccount(id, fields);
       return {
         content: [
@@ -1283,7 +1278,7 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     {
       title: 'Hold Budget For Next Month',
       description:
-        'Hold a specified Decimal Amount from the current month available budget to buffer next month.',
+        'Hold a specified Decimal Amount from the current month available budget for next month.',
       inputSchema: {
         month: budgetMonthSchema.describe(
           'Target Budget Month in YYYY-MM format (e.g. 2026-11).',
@@ -1323,7 +1318,7 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     {
       title: 'Reset Budget Hold',
       description:
-        'Reset the budget hold for a given month, releasing any held reserve funds back to the current month available budget.',
+        'Reset the budget hold for a given month, releasing held budget hold funds back to the current month available budget.',
       inputSchema: {
         month: budgetMonthSchema.describe(
           'Target Budget Month in YYYY-MM format (e.g. 2026-11).',

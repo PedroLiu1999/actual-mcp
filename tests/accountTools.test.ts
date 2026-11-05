@@ -115,6 +115,7 @@ describe('Account Lifecycle Management MCP Tools Seam', () => {
       readOnlyHint: false,
       destructiveHint: false,
     });
+    expect(updateAcct.inputSchema?.properties?.closed).toBeUndefined();
 
     const closeAcct = tools.find((t: { name: string }) => t.name === 'close_account');
     expect(closeAcct).toBeDefined();
@@ -266,7 +267,6 @@ describe('Account Lifecycle Management MCP Tools Seam', () => {
             id: 'acct-456',
             name: 'Emergency Fund',
             offbudget: true,
-            closed: false,
           },
         },
       });
@@ -277,7 +277,6 @@ describe('Account Lifecycle Management MCP Tools Seam', () => {
     expect(capturedFields).toEqual({
       name: 'Emergency Fund',
       offbudget: true,
-      closed: false,
     });
     expect(JSON.parse(callRes.body.result.content[0].text)).toEqual({
       id: 'acct-456',
@@ -355,6 +354,46 @@ describe('Account Lifecycle Management MCP Tools Seam', () => {
     expect(JSON.parse(callRes.body.result.content[0].text)).toEqual({
       id: 'acct-closing',
     });
+  });
+
+  it('returns error when closing an account with non-zero balance without transferAccountId', async () => {
+    const gateway = createStubGateway({
+      closeAccount: async (id, transferAccountId) => {
+        if (!transferAccountId) {
+          throw new Error(
+            `Cannot close account "${id}" with non-zero balance (5000) without specifying transferAccountId.`,
+          );
+        }
+        return { id };
+      },
+    });
+
+    const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
+
+    const callRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 71,
+        method: 'tools/call',
+        params: {
+          name: 'close_account',
+          arguments: {
+            id: 'acct-with-balance',
+          },
+        },
+      });
+
+    expect(callRes.status).toBe(200);
+    expect(callRes.body.result?.isError).toBe(true);
+    expect(callRes.body.result.content[0].text).toContain(
+      'Cannot close account "acct-with-balance" with non-zero balance (5000) without specifying transferAccountId.',
+    );
   });
 
   it('invokes reopen_account via tools/call and reactivates a closed account', async () => {

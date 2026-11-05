@@ -361,7 +361,7 @@ export interface BudgetGateway {
   ): Promise<{ id: string }>;
   updateAccount?(
     id: string,
-    fields: { name?: string; offbudget?: boolean; closed?: boolean },
+    fields: { name?: string; offbudget?: boolean },
   ): Promise<{ id: string }>;
   closeAccount?(
     id: string,

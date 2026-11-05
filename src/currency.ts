@@ -19,5 +19,5 @@ export function minorToDecimalAmount(minorAmount: number): number {
 }
 
 export const toMinorUnits = decimalToMinorAmount;
-export const toDecimalUnits = minorToDecimalAmount;
+
 

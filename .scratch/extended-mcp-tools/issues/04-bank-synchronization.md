@@ -4,10 +4,10 @@
 
 **Blocked by:** 03: Account Lifecycle Management Tools
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `run_bank_sync` accepts an optional `accountId` parameter.
-- [ ] When `accountId` is omitted, bank sync runs across all linked accounts; when supplied, only the specified account is synced.
-- [ ] Returns a structured JSON summary reporting `updatedAccountIds`, `newTransactionsCount`, `matchedTransactionsCount`, and any `errors`.
-- [ ] Mutex locking is maintained during sync and in-memory caches are refreshed/invalidated after sync completion.
-- [ ] End-to-end HTTP integration tests pass exercising `run_bank_sync` for single and all accounts via JSON-RPC `tools/call`.
+- [x] `run_bank_sync` accepts an optional `accountId` parameter.
+- [x] When `accountId` is omitted, bank sync runs across all linked accounts; when supplied, only the specified account is synced.
+- [x] Returns a structured JSON summary reporting `updatedAccountIds`, `newTransactionsCount`, `matchedTransactionsCount`, and any `errors`.
+- [x] Mutex locking is maintained during sync and in-memory caches are refreshed/invalidated after sync completion.
+- [x] End-to-end HTTP integration tests pass exercising `run_bank_sync` for single and all accounts via JSON-RPC `tools/call`.

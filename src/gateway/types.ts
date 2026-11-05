@@ -314,6 +314,13 @@ export interface MergePayeesResult {
   mergedCount: number;
 }
 
+export interface RunBankSyncResult {
+  updatedAccountIds: string[];
+  newTransactionsCount: number;
+  matchedTransactionsCount: number;
+  errors?: string[];
+}
+
 export interface BudgetGateway {
   getReadiness(): BudgetReadiness;
   listAccounts(options?: { forceSync?: boolean }): Promise<AccountSummary[]>;
@@ -362,6 +369,7 @@ export interface BudgetGateway {
     transferCategoryId?: string,
   ): Promise<{ id: string }>;
   reopenAccount?(id: string): Promise<{ id: string }>;
+  runBankSync?(accountId?: string): Promise<RunBankSyncResult>;
   initialize?(): Promise<void>;
   sync?(): Promise<void>;
   shutdown?(): Promise<void>;

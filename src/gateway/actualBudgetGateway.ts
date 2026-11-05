@@ -33,6 +33,7 @@ import type {
   GetSpendingSummaryInput,
   GetTransactionsFilter,
   PayeeSummary,
+  RunBankSyncResult,
   SetBudgetAmountInput,
   SetBudgetAmountResult,
   SpendingSummary,
@@ -210,6 +211,7 @@ export interface ActualApiAdapter {
     transferCategoryId?: string,
   ): Promise<unknown>;
   reopenAccount?(id: string): Promise<unknown>;
+  runBankSync?(args?: { accountId?: string }): Promise<unknown>;
   q?: typeof actualApi.q;
   aqlQuery?(query: ReturnType<typeof actualApi.q>): Promise<unknown>;
 }
@@ -281,6 +283,7 @@ export interface ActualBudgetGateway extends BudgetGateway {
     transferCategoryId?: string,
   ): Promise<{ id: string }>;
   reopenAccount(id: string): Promise<{ id: string }>;
+  runBankSync(accountId?: string): Promise<RunBankSyncResult>;
   executeRead<T>(
     operation: (api: ActualApiAdapter) => Promise<T>,
     options?: { forceSync?: boolean },
@@ -1182,7 +1185,6 @@ export function createActualBudgetGateway(
         return { id: input.id, success: true };
       });
     },
-<<<<<<< HEAD
     async setBudgetCarryover(
       month: string,
       categoryId: string,
@@ -1319,6 +1321,65 @@ export function createActualBudgetGateway(
         await apiAdapter.reopenAccount(id);
         cachedAccounts = null;
         return { id };
+      });
+    },
+    async runBankSync(accountId?: string): Promise<RunBankSyncResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.runBankSync) {
+          throw new Error('runBankSync is not supported by the current API adapter');
+        }
+        const raw = (await (accountId !== undefined
+          ? apiAdapter.runBankSync({ accountId })
+          : apiAdapter.runBankSync())) as
+          | {
+              updatedAccounts?: string[];
+              updatedAccountIds?: string[];
+              newTransactions?: unknown[];
+              newTransactionsCount?: number;
+              matchedTransactions?: unknown[];
+              matchedTransactionsCount?: number;
+              errors?: unknown[];
+            }
+          | undefined;
+
+        cachedAccounts = null;
+        cachedCategories = null;
+        cachedPayees = null;
+
+        const updatedAccountIds =
+          raw?.updatedAccountIds ??
+          raw?.updatedAccounts ??
+          (accountId ? [accountId] : []);
+
+        const newTransactionsCount =
+          typeof raw?.newTransactionsCount === 'number'
+            ? raw.newTransactionsCount
+            : Array.isArray(raw?.newTransactions)
+              ? raw.newTransactions.length
+              : 0;
+
+        const matchedTransactionsCount =
+          typeof raw?.matchedTransactionsCount === 'number'
+            ? raw.matchedTransactionsCount
+            : Array.isArray(raw?.matchedTransactions)
+              ? raw.matchedTransactions.length
+              : 0;
+
+        const errors =
+          Array.isArray(raw?.errors) && raw.errors.length > 0
+            ? raw.errors.map((e) =>
+                typeof e === 'string'
+                  ? e
+                  : String((e as { message?: string })?.message ?? e),
+              )
+            : undefined;
+
+        return {
+          updatedAccountIds,
+          newTransactionsCount,
+          matchedTransactionsCount,
+          ...(errors ? { errors } : {}),
+        };
       });
     },
   };

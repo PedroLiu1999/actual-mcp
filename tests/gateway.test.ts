@@ -1582,6 +1582,116 @@ describe('BudgetGateway seam — category and category group mutations & cache i
       ).rejects.toThrow('resetBudgetHold is not supported by the current API adapter');
     });
   });
+
+  describe('BudgetGateway seam — runBankSync', () => {
+    it('executes runBankSync for all accounts within executeWrite (pre-sync, api call, post-sync) and invalidates caches', async () => {
+      const events: string[] = [];
+      let accountsFetchCount = 0;
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => {
+          accountsFetchCount++;
+          return [{ id: 'acct-1', name: 'Checking' }];
+        },
+        getAccountBalance: async () => 10000,
+        sync: async () => {
+          events.push('api:sync');
+        },
+        runBankSync: async (args) => {
+          events.push(`api:runBankSync:${args?.accountId ?? 'all'}`);
+          return {
+            updatedAccounts: ['acct-1', 'acct-2'],
+            newTransactions: ['tx-1', 'tx-2', 'tx-3'],
+            matchedTransactions: ['tx-4'],
+          };
+        },
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      // Populate account cache
+      await gateway.listAccounts();
+      expect(accountsFetchCount).toBe(1);
+
+      // Trigger bank sync
+      const result = await gateway.runBankSync!();
+      expect(result).toEqual({
+        updatedAccountIds: ['acct-1', 'acct-2'],
+        newTransactionsCount: 3,
+        matchedTransactionsCount: 1,
+      });
+
+      expect(events).toEqual([
+        'api:sync',
+        'api:sync',
+        'api:runBankSync:all',
+        'api:sync',
+      ]);
+
+      // Cache should be invalidated, so listAccounts calls getAccounts again
+      await gateway.listAccounts();
+      expect(accountsFetchCount).toBe(2);
+    });
+
+    it('executes runBankSync for single account with args.accountId', async () => {
+      const events: string[] = [];
+      let capturedArgs: unknown;
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {
+          events.push('api:sync');
+        },
+        runBankSync: async (args) => {
+          capturedArgs = args;
+          events.push(`api:runBankSync:${args?.accountId}`);
+          return {
+            updatedAccountIds: ['acct-checking'],
+            newTransactionsCount: 2,
+            matchedTransactionsCount: 1,
+            errors: ['Warning: partial sync'],
+          };
+        },
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      const result = await gateway.runBankSync!('acct-checking');
+      expect(capturedArgs).toEqual({ accountId: 'acct-checking' });
+      expect(result).toEqual({
+        updatedAccountIds: ['acct-checking'],
+        newTransactionsCount: 2,
+        matchedTransactionsCount: 1,
+        errors: ['Warning: partial sync'],
+      });
+      expect(events).toEqual([
+        'api:sync',
+        'api:runBankSync:acct-checking',
+        'api:sync',
+      ]);
+    });
+
+    it('throws if api.runBankSync is not supported', async () => {
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [],
+        getAccountBalance: async () => 0,
+        sync: async () => {},
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      await expect(gateway.runBankSync!()).rejects.toThrow(
+        'runBankSync is not supported by the current API adapter',
+      );
+    });
   });
 });
 

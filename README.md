@@ -160,11 +160,12 @@ mkdir -p actual-mcp && cd actual-mcp && bash -c "$(curl -fsSL https://raw.github
 The interactive wizard handles everything end-to-end:
 1. **Auto-Downloads `docker-compose.yml`**: Fetches the compose file and creates the persistent `data/` directory.
 2. **Configures `.env`**: Sets up `PUBLIC_URL` (for your Cloudflare Tunnel) and loopback `PORT` (default `3000`).
-3. **OAuth Configuration**: Prompts for `OAUTH_ADMIN_PASSWORD` (Admin Consent Passphrase) and configures allowed redirect URIs.
-4. **Actual Budget Connection**: Prompts for `ACTUAL_SERVER_URL`, server password, and `ACTUAL_SYNC_ID`.
-5. **Starts Docker Container**: Offers to pull the pre-built image from GHCR and start it (`docker compose pull && docker compose up -d`).
-6. **Healthchecks**: Tests local and public `/healthz` endpoints.
-7. **Connect AI Client**: Displays the exact `MCP server URL` (`${PUBLIC_URL}/mcp`) to paste into your AI assistant.
+3. **OAuth Admin Passphrase**: Prompts for `OAUTH_ADMIN_PASSWORD` (Admin Consent Passphrase).
+4. **Target AI Clients Multiselect**: Select which AI clients you plan to connect (Google Gemini, Claude, Cursor, ChatGPT, etc.) and automatically configures exact return URLs.
+5. **Actual Budget Connection**: Prompts for `ACTUAL_SERVER_URL`, server password, and `ACTUAL_SYNC_ID`.
+6. **Starts Docker Container**: Offers to pull the pre-built image from GHCR and start it (`docker compose pull && docker compose up -d`).
+7. **Healthchecks**: Tests local and public `/healthz` endpoints.
+8. **Connect AI Client(s)**: Displays tailored connection instructions for each selected AI client.
 
 ---
 

@@ -202,9 +202,76 @@ finish() {
 # STAGES: author this section. One stage() per step the human takes.
 # ──────────────────────────────────────────────────────────────────────────
 
+join_by() {
+  local d="$1"; shift; local f="${1:-}"; shift || true
+  if [[ -z "$f" ]]; then return 0; fi
+  printf '%s' "$f" "${@/#/$d}"
+}
+
+# Generate a cryptographically secure 32-character hexadecimal passphrase (128-bit entropy)
+generate_passphrase() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 16
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c "import secrets; print(secrets.token_hex(16))"
+  else
+    LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c 32
+  fi
+}
+
+# Parse comma-, space-, or keyword-based multiselect agent input
+parse_agent_selection() {
+  local raw="$1"
+  local clean
+  clean=$(printf '%s' "$raw" | tr ',' ' ' | tr '[:upper:]' '[:lower:]')
+
+  SELECTED_GEMINI=0
+  SELECTED_CLAUDE=0
+  SELECTED_CURSOR=0
+  SELECTED_CHATGPT=0
+  SELECTED_CUSTOM=0
+
+  if [[ " $clean " =~ [[:space:]]all[[:space:]] ]]; then
+    SELECTED_GEMINI=1
+    SELECTED_CLAUDE=1
+    SELECTED_CURSOR=1
+    SELECTED_CHATGPT=1
+    SELECTED_CUSTOM=1
+    return 0
+  fi
+
+  for token in $clean; do
+    case "$token" in
+      1|gemini|google)
+        SELECTED_GEMINI=1
+        ;;
+      2|claude|anthropic)
+        SELECTED_CLAUDE=1
+        ;;
+      3|cursor)
+        SELECTED_CURSOR=1
+        ;;
+      4|chatgpt|openai|gpt)
+        SELECTED_CHATGPT=1
+        ;;
+      5|custom|other)
+        SELECTED_CUSTOM=1
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  done
+
+  if (( SELECTED_GEMINI == 0 && SELECTED_CLAUDE == 0 && SELECTED_CURSOR == 0 && SELECTED_CHATGPT == 0 && SELECTED_CUSTOM == 0 )); then
+    return 1
+  fi
+  return 0
+}
+
 run_wizard() {
 
-TOTAL_STAGES=6
+TOTAL_STAGES=7
 
 banner "Actual MCP Setup & Deployment Wizard"
 
@@ -246,33 +313,194 @@ write_env PORT "$PORT"
 write_env DATA_DIR "/data"
 write_env SYNC_TTL_SECONDS "30"
 
-# ── Stage 2: OAuth 2.1 Public Client & Consent Passphrase ──────────────────
-stage "OAuth 2.1 & Admin Passphrase"
+# ── Stage 2: OAuth 2.1 Consent Passphrase ──────────────────────────────────
+stage "OAuth 2.1 Admin Passphrase"
 say "actual-mcp uses OAuth 2.1 with PKCE and automatic client registration (/register)."
 say "When connecting, your browser will prompt for your Admin Passphrase on the consent page."
 printf '\n'
 
-say "Choose an Admin Passphrase used to approve OAuth connections on https://${PUBLIC_URL#https://}/authorize"
-ask_secret OAUTH_ADMIN_PASSWORD "Admin Consent Passphrase:"
-while [[ -z "$OAUTH_ADMIN_PASSWORD" ]]; do
-  warn "Admin Passphrase cannot be empty."
-  ask_secret OAUTH_ADMIN_PASSWORD "Admin Consent Passphrase:"
-done
+EXISTING_PASS=$(_existing "OAUTH_ADMIN_PASSWORD" || true)
+if [[ -n "$EXISTING_PASS" ]]; then
+  say "An existing Admin Passphrase was detected in $ENV_FILE."
+  if confirm "Keep current Admin Passphrase from $ENV_FILE?"; then
+    OAUTH_ADMIN_PASSWORD="$EXISTING_PASS"
+  else
+    if confirm "Generate a new cryptographically secure passphrase automatically?"; then
+      OAUTH_ADMIN_PASSWORD=$(generate_passphrase)
+      printf '\n'
+      say "${BOLD}Generated Secure Admin Passphrase:${RESET}"
+      say "  ${GREEN}${OAUTH_ADMIN_PASSWORD}${RESET}"
+      note "Copy and save this passphrase in your password manager."
+      printf '\n'
+      pause "Press Enter after you have copied the passphrase"
+    else
+      ask_secret OAUTH_ADMIN_PASSWORD "Enter new Admin Consent Passphrase:"
+      while [[ -z "$OAUTH_ADMIN_PASSWORD" ]]; do
+        warn "Admin Passphrase cannot be empty."
+        ask_secret OAUTH_ADMIN_PASSWORD "Enter new Admin Consent Passphrase:"
+      done
+    fi
+  fi
+else
+  say "Choose an Admin Passphrase used to approve OAuth connections on https://${PUBLIC_URL#https://}/authorize"
+  if confirm "Generate a cryptographically secure passphrase automatically?"; then
+    OAUTH_ADMIN_PASSWORD=$(generate_passphrase)
+    printf '\n'
+    say "${BOLD}Generated Secure Admin Passphrase:${RESET}"
+    say "  ${GREEN}${OAUTH_ADMIN_PASSWORD}${RESET}"
+    note "Copy and save this passphrase in your password manager."
+    printf '\n'
+    pause "Press Enter after you have copied the passphrase"
+  else
+    ask_secret OAUTH_ADMIN_PASSWORD "Admin Consent Passphrase:"
+    while [[ -z "$OAUTH_ADMIN_PASSWORD" ]]; do
+      warn "Admin Passphrase cannot be empty."
+      ask_secret OAUTH_ADMIN_PASSWORD "Admin Consent Passphrase:"
+    done
+  fi
+fi
 write_env OAUTH_ADMIN_PASSWORD "$OAUTH_ADMIN_PASSWORD"
 
+# ── Stage 3: Target AI Clients & Return URLs ───────────────────────────────
+stage "Target AI Clients & OAuth Return URLs"
+say "Select which AI clients / agents you plan to connect with Actual Budget."
+say "The wizard will configure the exact OAuth redirect return URLs needed for each client."
 printf '\n'
-say "Configure allowed OAuth redirect URIs (loopback ports and well-known callbacks pre-configured)."
-EXISTING_REDIRECTS=$(_existing "OAUTH_ALLOWED_REDIRECT_URIS" || true)
-ENV_EXAMPLE_REDIRECTS=$(grep -E '^OAUTH_ALLOWED_REDIRECT_URIS=' .env.example 2>/dev/null | cut -d= -f2- | tr -d "'" | tr -d '"' || true)
-DEFAULT_REDIRECTS="${ENV_EXAMPLE_REDIRECTS:-http://localhost,http://127.0.0.1,https://oauth-redirect.googleusercontent.com/r/,https://oauth-redirect.googleusercontent.com/a/,https://vertexaisearch.cloud.google.com/oauth-redirect}"
-if [[ -z "$EXISTING_REDIRECTS" || "$EXISTING_REDIRECTS" == "http://localhost,http://127.0.0.1" ]]; then
-  ask OAUTH_ALLOWED_REDIRECT_URIS "Allowed Redirect URIs:" "$DEFAULT_REDIRECTS"
-else
-  ask OAUTH_ALLOWED_REDIRECT_URIS "Allowed Redirect URIs:"
+say "Available AI client presets:"
+say "  1) Google Gemini (Web Connected Apps, Developer Mode, Vertex AI)"
+say "  2) Claude (Claude Desktop, Claude Code)"
+say "  3) Cursor (Cursor IDE)"
+say "  4) ChatGPT / OpenAI (Custom GPTs / Actions)"
+say "  5) Custom / Other MCP Client"
+printf '\n'
+
+CURRENT_AGENTS=$(_existing "AI_AGENTS" || true)
+DEFAULT_SELECTION="1, 2, 3"
+if [[ -n "$CURRENT_AGENTS" ]]; then
+  DEFAULT_NUMS=()
+  [[ "$CURRENT_AGENTS" == *"gemini"* ]] && DEFAULT_NUMS+=("1")
+  [[ "$CURRENT_AGENTS" == *"claude"* ]] && DEFAULT_NUMS+=("2")
+  [[ "$CURRENT_AGENTS" == *"cursor"* ]] && DEFAULT_NUMS+=("3")
+  [[ "$CURRENT_AGENTS" == *"chatgpt"* ]] && DEFAULT_NUMS+=("4")
+  [[ "$CURRENT_AGENTS" == *"custom"* ]] && DEFAULT_NUMS+=("5")
+  if (( ${#DEFAULT_NUMS[@]} > 0 )); then
+    DEFAULT_SELECTION=$(join_by ", " "${DEFAULT_NUMS[@]}")
+  fi
+elif [[ -n "$(_existing 'OAUTH_ALLOWED_REDIRECT_URIS' || true)" ]]; then
+  EXISTING_REDIRECTS=$(_existing "OAUTH_ALLOWED_REDIRECT_URIS" || true)
+  DEFAULT_NUMS=()
+  if [[ "$EXISTING_REDIRECTS" == *"googleusercontent"* || "$EXISTING_REDIRECTS" == *"vertexaisearch"* ]]; then
+    DEFAULT_NUMS+=("1")
+  fi
+  if [[ "$EXISTING_REDIRECTS" == *"localhost"* || "$EXISTING_REDIRECTS" == *"127.0.0.1"* ]]; then
+    DEFAULT_NUMS+=("2" "3")
+  fi
+  if [[ "$EXISTING_REDIRECTS" == *"chatgpt"* || "$EXISTING_REDIRECTS" == *"openai"* ]]; then
+    DEFAULT_NUMS+=("4")
+  fi
+  if (( ${#DEFAULT_NUMS[@]} > 0 )); then
+    DEFAULT_SELECTION=$(join_by ", " "${DEFAULT_NUMS[@]}")
+  fi
 fi
+
+ask AGENT_CHOICES "AI Clients to set up (numbers, 'all', or names):" "$DEFAULT_SELECTION"
+while ! parse_agent_selection "$AGENT_CHOICES"; do
+  warn "Invalid selection '$AGENT_CHOICES'. Enter numbers (e.g. 1, 2, 3), 'all', or names."
+  ask AGENT_CHOICES "AI Clients to set up (numbers, 'all', or names):" "$DEFAULT_SELECTION"
+done
+
+SELECTED_NAMES=()
+SELECTED_KEYS=()
+REDIRECT_URIS=("http://localhost" "http://127.0.0.1")
+
+if (( SELECTED_GEMINI )); then
+  SELECTED_NAMES+=("Google Gemini")
+  SELECTED_KEYS+=("gemini")
+  REDIRECT_URIS+=("https://oauth-redirect.googleusercontent.com/r/")
+  REDIRECT_URIS+=("https://oauth-redirect.googleusercontent.com/a/")
+  REDIRECT_URIS+=("https://vertexaisearch.cloud.google.com/oauth-redirect")
+fi
+
+if (( SELECTED_CLAUDE )); then
+  SELECTED_NAMES+=("Claude")
+  SELECTED_KEYS+=("claude")
+  REDIRECT_URIS+=("https://claude.ai/api/mcp/oauth/callback")
+fi
+
+if (( SELECTED_CURSOR )); then
+  SELECTED_NAMES+=("Cursor")
+  SELECTED_KEYS+=("cursor")
+fi
+
+if (( SELECTED_CHATGPT )); then
+  SELECTED_NAMES+=("ChatGPT / OpenAI")
+  SELECTED_KEYS+=("chatgpt")
+  REDIRECT_URIS+=("https://chatgpt.com/aip/")
+  REDIRECT_URIS+=("https://chat.openai.com/aip/")
+  printf '\n'
+  say "OpenAI Custom GPTs use return URLs like: https://chatgpt.com/aip/g-<id>/oauth/callback"
+  if confirm "Do you have a specific OpenAI Custom GPT redirect URI to add?"; then
+    ask CHATGPT_SPECIFIC_URI "Paste full Custom GPT redirect URI (must start with https://):"
+    while [[ -n "$CHATGPT_SPECIFIC_URI" && "$CHATGPT_SPECIFIC_URI" != https://* ]]; do
+      warn "Redirect URI must start with https://"
+      ask CHATGPT_SPECIFIC_URI "Paste full Custom GPT redirect URI (must start with https://):"
+    done
+    if [[ -n "$CHATGPT_SPECIFIC_URI" ]]; then
+      REDIRECT_URIS+=("$CHATGPT_SPECIFIC_URI")
+    fi
+  fi
+fi
+
+if (( SELECTED_CUSTOM )); then
+  SELECTED_NAMES+=("Custom / Other")
+  SELECTED_KEYS+=("custom")
+  printf '\n'
+  if confirm "Do you have an additional custom HTTPS OAuth redirect URI to add?"; then
+    ask CUSTOM_URI "Custom OAuth redirect URI (must start with https://):"
+    while [[ -n "$CUSTOM_URI" && "$CUSTOM_URI" != https://* ]]; do
+      warn "Redirect URI must start with https://"
+      ask CUSTOM_URI "Custom OAuth redirect URI (must start with https://):"
+    done
+    if [[ -n "$CUSTOM_URI" ]]; then
+      REDIRECT_URIS+=("$CUSTOM_URI")
+    fi
+  fi
+fi
+
+# Deduplicate redirect URIs
+DEDUP_URIS=()
+for uri in "${REDIRECT_URIS[@]}"; do
+  already_present=0
+  for existing_u in "${DEDUP_URIS[@]}"; do
+    if [[ "$existing_u" == "$uri" ]]; then
+      already_present=1
+      break
+    fi
+  done
+  if (( ! already_present )); then
+    DEDUP_URIS+=("$uri")
+  fi
+done
+
+OAUTH_ALLOWED_REDIRECT_URIS=$(join_by "," "${DEDUP_URIS[@]}")
+AI_AGENTS=$(join_by "," "${SELECTED_KEYS[@]}")
+
+printf '\n'
+say "${BOLD}Selected AI Clients:${RESET} $(join_by ", " "${SELECTED_NAMES[@]}")"
+say "Configured OAuth Redirect URIs based on your selection:"
+for u in "${DEDUP_URIS[@]}"; do
+  note "  • $u"
+done
+printf '\n'
+
+if confirm "Customize or add more redirect URIs manually?"; then
+  ask OAUTH_ALLOWED_REDIRECT_URIS "Allowed Redirect URIs:" "$OAUTH_ALLOWED_REDIRECT_URIS"
+fi
+
+write_env AI_AGENTS "$AI_AGENTS"
 write_env OAUTH_ALLOWED_REDIRECT_URIS "$OAUTH_ALLOWED_REDIRECT_URIS"
 
-# ── Stage 3: Actual Budget Sync Server ─────────────────────────────────────
+# ── Stage 4: Actual Budget Sync Server ─────────────────────────────────────
 stage "Actual Budget Sync Server Connection"
 say "Configure your self-hosted Actual Budget server connection."
 say "If actual-mcp runs on the same VPS, use host.docker.internal or your server URL."
@@ -296,7 +524,7 @@ while [[ -z "$ACTUAL_PASSWORD" ]]; do
 done
 write_env ACTUAL_PASSWORD "$ACTUAL_PASSWORD"
 
-# ── Stage 4: Target Budget Sync ID & Encryption ────────────────────────────
+# ── Stage 5: Target Budget Sync ID & Encryption ────────────────────────────
 stage "Target Budget Sync ID & Encryption"
 say "Find your Sync ID in Actual Budget:"
 step "Open Actual Budget in your browser or desktop app."
@@ -320,7 +548,7 @@ else
   note "End-to-end encryption password skipped."
 fi
 
-# ── Stage 5: Deployment Verification ───────────────────────────────────────
+# ── Stage 6: Deployment Verification ───────────────────────────────────────
 stage "Cloudflare Tunnel & Docker Startup"
 say "Configuration has been saved to $ENV_FILE."
 printf '\n'
@@ -358,21 +586,96 @@ else
 fi
 pause "Press Enter to continue to AI client connection details"
 
-# ── Stage 6: Connect your AI Client ────────────────────────────────────────
-stage "Connect your AI Client"
-say "Connect your MCP server in Claude Desktop, Cursor, Gemini, or any MCP client:"
-step "Add the MCP server URL in your client configuration:"
+# ── Stage 7: Connect your AI Client(s) ─────────────────────────────────────
+stage "Connect your AI Client(s)"
+say "Your Actual MCP server is running and ready to connect."
 printf '\n'
-say "%s──────────────── Copy & Paste into Your Client ────────────────%s" "$BOLD" "$RESET"
-say "  %sMCP Server URL:%s    ${PUBLIC_URL}/mcp" "$BLUE" "$RESET"
-say "  %sAuthentication:%s    OAuth 2.1 (PKCE)" "$BLUE" "$RESET"
-say "%s────────────────────────────────────────────────────────────────%s" "$BOLD" "$RESET"
+say "${BOLD}──────────────── Copy & Paste into Your Client ────────────────${RESET}"
+say "  ${BLUE}MCP Server URL:${RESET}        ${PUBLIC_URL}/mcp"
+say "  ${BLUE}OAuth Authentication:${RESET}  OAuth 2.1 (PKCE, public client)"
+say "  ${BLUE}Authorization URL:${RESET}     ${PUBLIC_URL}/authorize"
+say "  ${BLUE}Token URL:${RESET}             ${PUBLIC_URL}/token"
+if [[ -n "${OAUTH_ADMIN_PASSWORD:-}" ]]; then
+say "  ${BLUE}Admin Passphrase:${RESET}      ${OAUTH_ADMIN_PASSWORD}"
+fi
+say "${BOLD}────────────────────────────────────────────────────────────────${RESET}"
 printf '\n'
-step "When connecting, your browser will open: ${PUBLIC_URL}/authorize"
-step "Enter your Admin Consent Passphrase to approve the link."
-step "Your client will complete the connection automatically!"
+say "Consent approval workflow:"
+step "1. When connecting, your client opens: ${PUBLIC_URL}/authorize"
+step "2. Enter your Admin Consent Passphrase to approve the connection."
+step "3. Your client completes authentication and loads all 39 Actual Budget tools!"
 printf '\n'
-pause "Press Enter once you have connected your client"
+
+# Display tailored instructions for selected agents
+if [[ "${AI_AGENTS:-}" == *"gemini"* || "${SELECTED_GEMINI:-0}" == "1" ]]; then
+  say "${BOLD}▸ Google Gemini Setup Instructions:${RESET}"
+  step "Open Google Gemini in your browser: https://gemini.google.com"
+  step "Go to Settings > Connected Apps / Extensions (or Developer Mode)."
+  step "Click 'Connect to an MCP server' (or 'Add custom app')."
+  step "Enter your Server URL (only field required):"
+  say "    ${BLUE}${PUBLIC_URL}/mcp${RESET}"
+  note "    Gemini automatically discovers OAuth metadata and server tools."
+  step "Click Connect. In the popup tab at ${PUBLIC_URL}/authorize, enter your Admin Passphrase."
+  printf '\n'
+fi
+
+if [[ "${AI_AGENTS:-}" == *"claude"* || "${SELECTED_CLAUDE:-0}" == "1" ]]; then
+  say "${BOLD}▸ Claude Setup Instructions (Desktop & CLI):${RESET}"
+  step "For Claude Desktop:"
+  say "  Add actual-mcp to your claude_desktop_config.json:"
+  printf '    %s{\n' "$DIM"
+  printf '      "mcpServers": {\n'
+  printf '        "actual": {\n'
+  printf '          "url": "%s/mcp"\n' "${PUBLIC_URL}"
+  printf '        }\n'
+  printf '      }\n'
+  printf '    }%s\n' "$RESET"
+  note "  Config file locations:"
+  note "    • macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json"
+  note "    • Windows: %APPDATA%\\Claude\\claude_desktop_config.json"
+  note "    • Linux:   ~/.config/Claude/claude_desktop_config.json"
+  step "For Claude Code (CLI):"
+  say "  Run: claude mcp add actual ${PUBLIC_URL}/mcp"
+  step "Start Claude. It will open ${PUBLIC_URL}/authorize in your browser."
+  step "Enter your Admin Consent Passphrase to grant access."
+  printf '\n'
+fi
+
+if [[ "${AI_AGENTS:-}" == *"cursor"* || "${SELECTED_CURSOR:-0}" == "1" ]]; then
+  say "${BOLD}▸ Cursor Setup Instructions:${RESET}"
+  step "Open Cursor Settings > Features > MCP (or Settings > MCP Servers)."
+  step "Click '+ Add New MCP Server'."
+  step "Configure:"
+  say "    • Name: actual-budget"
+  say "    • Type: sse or http"
+  say "    • URL:  ${PUBLIC_URL}/mcp"
+  step "Click Connect. When your browser opens, enter your Admin Passphrase."
+  printf '\n'
+fi
+
+if [[ "${AI_AGENTS:-}" == *"chatgpt"* || "${SELECTED_CHATGPT:-0}" == "1" ]]; then
+  say "${BOLD}▸ ChatGPT / OpenAI (Custom GPT) Setup Instructions:${RESET}"
+  step "In ChatGPT, navigate to Explore GPTs > Create a GPT > Configure > Actions."
+  step "Create an Action pointing to: ${PUBLIC_URL}/mcp"
+  step "Under Authentication, choose OAuth:"
+  say "    • Authorization URL: ${PUBLIC_URL}/authorize"
+  say "    • Token URL:         ${PUBLIC_URL}/token"
+  say "    • Scope:             mcp:tools"
+  step "When running the action in chat, click Authorize and enter your Admin Passphrase."
+  printf '\n'
+fi
+
+if [[ "${AI_AGENTS:-}" == *"custom"* || "${SELECTED_CUSTOM:-0}" == "1" ]]; then
+  say "${BOLD}▸ Custom MCP Client Instructions:${RESET}"
+  step "MCP Server URL:          ${PUBLIC_URL}/mcp"
+  step "Transport:               Streamable HTTP (JSON-RPC over POST /mcp)"
+  step "Protected Resource Doc:  ${PUBLIC_URL}/.well-known/oauth-protected-resource"
+  step "Auth Server Metadata:    ${PUBLIC_URL}/.well-known/oauth-authorization-server"
+  step "Auth Flow:               Authorization Code with PKCE (S256)"
+  printf '\n'
+fi
+
+pause "Press Enter once you have connected your client(s)"
 
 finish
 }

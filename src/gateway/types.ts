@@ -8,6 +8,15 @@ export type {
   StructuredAqlQueryInput,
 } from './aql.js';
 
+export type AccountType =
+  | 'checking'
+  | 'savings'
+  | 'credit'
+  | 'investment'
+  | 'mortgage'
+  | 'debt'
+  | 'other';
+
 export interface AccountSummary {
   id: string;
   name: string;
@@ -339,6 +348,20 @@ export interface BudgetGateway {
   updatePayee?(id: string, fields: { name?: string }): Promise<{ id: string }>;
   deletePayee?(id: string): Promise<{ id: string }>;
   mergePayees?(targetId: string, mergeIds: string[]): Promise<{ targetId: string; mergedCount: number }>;
+  createAccount?(
+    account: { name: string; type: AccountType; offbudget?: boolean },
+    initialBalance?: number,
+  ): Promise<{ id: string }>;
+  updateAccount?(
+    id: string,
+    fields: { name?: string; offbudget?: boolean; closed?: boolean },
+  ): Promise<{ id: string }>;
+  closeAccount?(
+    id: string,
+    transferAccountId?: string,
+    transferCategoryId?: string,
+  ): Promise<{ id: string }>;
+  reopenAccount?(id: string): Promise<{ id: string }>;
   initialize?(): Promise<void>;
   sync?(): Promise<void>;
   shutdown?(): Promise<void>;

@@ -1208,6 +1208,112 @@ describe('BudgetGateway seam — category and category group mutations & cache i
     expect(events).toEqual(['api:sync', 'api:deleteCategoryGroup:grp-new-1:cat-general', 'api:sync']);
   });
 
+  it('manages account lifecycles (create, update, close, reopen) with Coalesced Sync before/after and decimal-to-minor balance conversion', async () => {
+    const events: string[] = [];
+
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [
+        { id: 'acct-existing', name: 'Checking', offbudget: false, closed: false },
+      ],
+      getAccountBalance: async () => 100000,
+      sync: async () => {
+        events.push('api:sync');
+      },
+      createAccount: async (account, initialBalance) => {
+        events.push(
+          `api:createAccount:${JSON.stringify(account)}:${initialBalance !== undefined ? initialBalance : 'none'}`,
+        );
+        return 'acct-new-1';
+      },
+      updateAccount: async (id, fields) => {
+        events.push(`api:updateAccount:${id}:${JSON.stringify(fields)}`);
+      },
+      closeAccount: async (id, transferAccountId, transferCategoryId) => {
+        events.push(
+          `api:closeAccount:${id}:${transferAccountId ?? 'none'}:${transferCategoryId ?? 'none'}`,
+        );
+      },
+      reopenAccount: async (id) => {
+        events.push(`api:reopenAccount:${id}`);
+      },
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+      syncTtlSeconds: 60,
+    });
+
+    // 1. createAccount with Decimal Amount initialBalance converted to Minor Unit Amount
+    events.length = 0;
+    const createRes = await gateway.createAccount!(
+      {
+        name: 'High Yield Savings',
+        type: 'savings',
+        offbudget: false,
+      },
+      2500.75, // $2500.75 -> 250075 minor units
+    );
+    expect(createRes).toEqual({ id: 'acct-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:createAccount:{"name":"High Yield Savings","type":"savings","offbudget":false}:250075',
+      'api:sync',
+    ]);
+
+    // 2. createAccount with no initialBalance
+    events.length = 0;
+    const createNoBalRes = await gateway.createAccount!({
+      name: 'Credit Card',
+      type: 'credit',
+      offbudget: false,
+    });
+    expect(createNoBalRes).toEqual({ id: 'acct-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:createAccount:{"name":"Credit Card","type":"credit","offbudget":false}:none',
+      'api:sync',
+    ]);
+
+    // 3. updateAccount updates name and toggles flags
+    events.length = 0;
+    const updateRes = await gateway.updateAccount!('acct-new-1', {
+      name: 'Primary Credit Card',
+      offbudget: true,
+      closed: false,
+    });
+    expect(updateRes).toEqual({ id: 'acct-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:updateAccount:acct-new-1:{"name":"Primary Credit Card","offbudget":true,"closed":false}',
+      'api:sync',
+    ]);
+
+    // 4. closeAccount forwards balance transfer targets
+    events.length = 0;
+    const closeRes = await gateway.closeAccount!(
+      'acct-new-1',
+      'acct-existing',
+      'cat-transfer',
+    );
+    expect(closeRes).toEqual({ id: 'acct-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:closeAccount:acct-new-1:acct-existing:cat-transfer',
+      'api:sync',
+    ]);
+
+    // 5. reopenAccount reactivates the account
+    events.length = 0;
+    const reopenRes = await gateway.reopenAccount!('acct-new-1');
+    expect(reopenRes).toEqual({ id: 'acct-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:reopenAccount:acct-new-1',
+      'api:sync',
+    ]);
+  });
+
   it('caches listPayees in-memory, serves cache within TTL, and invalidates on forceSync or sync', async () => {
     let syncCount = 0;
     let getPayeesCount = 0;

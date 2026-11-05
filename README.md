@@ -341,6 +341,12 @@ npm run typecheck
 npm run build
 ```
 
+### Continuous Integration (CI)
+
+Automated GitHub Actions workflows run on every pull request and push to `main`:
+- **CI Pipeline** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): Runs dependency installation (`npm ci`), TypeScript typecheck (`npm run typecheck`), full Vitest test suite (`npm test`), and production compilation (`npm run build`) across supported Node.js versions (`22.x`, `24.x`).
+- **Container Build & Publish** ([`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml)): Builds and pushes multi-architecture (`linux/amd64`, `linux/arm64`) Docker container images to GitHub Container Registry.
+
 ---
 
 ## Brand & Logo Assets

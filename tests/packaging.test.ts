@@ -152,11 +152,27 @@ describe('Packaging & deployment artifacts', () => {
     expect(readme).toContain('Client Secret');
   });
 
-  it('aligns version across package.json and src/mcp/server.ts to 0.2.0', () => {
+  it('aligns version across package.json and src/mcp/server.ts to 0.2.1', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
-    expect(pkg.version).toBe('0.2.0');
+    expect(pkg.version).toBe('0.2.1');
 
     const serverCode = fs.readFileSync(path.join(repoRoot, 'src/mcp/server.ts'), 'utf8');
-    expect(serverCode).toContain("version: '0.2.0'");
+    expect(serverCode).toContain("version: '0.2.1'");
+  });
+
+  it('defines a GitHub Actions CI pipeline (.github/workflows/ci.yml) with typecheck, test, and build across supported Node versions', () => {
+    const ciPath = path.join(repoRoot, '.github/workflows/ci.yml');
+    expect(fs.existsSync(ciPath)).toBe(true);
+
+    const ciContent = fs.readFileSync(ciPath, 'utf8');
+    expect(ciContent).toContain('push:');
+    expect(ciContent).toContain('pull_request:');
+    expect(ciContent).toContain('main');
+    expect(ciContent).toContain('npm ci');
+    expect(ciContent).toContain('npm run typecheck');
+    expect(ciContent).toContain('npm test');
+    expect(ciContent).toContain('npm run build');
+    expect(ciContent).toContain('node-version: [22.x, 24.x]');
+    expect(ciContent).toContain('dist/index.js');
   });
 });

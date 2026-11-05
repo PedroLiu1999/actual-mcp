@@ -18,36 +18,6 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 
 ![actual-mcp Architecture](docs/assets/architecture.svg)
 
-```mermaid
-flowchart TD
-    subgraph Client["External Client"]
-        Gemini["Google Gemini - Custom MCP Connector"]
-    end
-
-    subgraph Ingress["Edge and Ingress"]
-        Tunnel["Cloudflare Tunnel - cloudflared HTTPS"]
-    end
-
-    subgraph Container["actual-mcp Docker Container"]
-        OAuth["Embedded OAuth 2.1 Server<br/>RFC 8414 and RFC 9728 Metadata<br/>PKCE and Consent Screen<br/>Persistent Token Store"]
-        Transport["Stateless Streamable HTTP /mcp<br/>30 MCP Tools: 8 Read, 22 Write<br/>Decimal Amount to Minor Unit Conversion"]
-        Gateway["ActualBudgetGateway<br/>FIFO Mutex<br/>Coalesced Sync and Metadata Caches"]
-        Cache[("Local SQLite Budget Cache<br/>Directory: /data/budget-cache")]
-    end
-
-    subgraph Upstream["Upstream Infrastructure"]
-        SyncServer["Actual Budget Sync Server<br/>actual-server :5006"]
-    end
-
-    Gemini -->|HTTPS and OAuth| Tunnel
-    Tunnel -->|OAuth Authorization| OAuth
-    Tunnel -->|POST /mcp with Bearer Token| Transport
-    OAuth -.->|Validate Token| Transport
-    Transport -->|Mutex-Protected Calls| Gateway
-    Gateway <-->|Local Read and Write| Cache
-    Gateway -->|HTTP Sync on Port 5006| SyncServer
-```
-
 <details>
 <summary>ASCII Diagram Fallback</summary>
 

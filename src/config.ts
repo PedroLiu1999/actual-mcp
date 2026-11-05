@@ -8,6 +8,11 @@ const configSchema = z.object({
     .trim()
     .url()
     .transform((url) => url.replace(/\/+$/, '')),
+  LOGO_URL: z
+    .string()
+    .trim()
+    .url()
+    .optional(),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   DATA_DIR: nonEmptyString,
   OAUTH_CLIENT_ID: nonEmptyString,

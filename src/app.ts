@@ -72,6 +72,7 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
   const resourceServerUrl = new URL(`${config.PUBLIC_URL}/mcp`);
   const scopesSupported = ['mcp:tools'];
   const oauthProvider = new EmbeddedOAuthProvider(config);
+  const logoUrl = config.LOGO_URL ?? `${config.PUBLIC_URL}/logo.png`;
 
   const oauthMetadata: OAuthMetadata = {
     ...createOAuthMetadata({
@@ -80,7 +81,7 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
       scopesSupported,
     }),
     issuer: config.PUBLIC_URL,
-    logo_uri: BRAND_ICON_DATA_URI,
+    logo_uri: logoUrl,
     token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
     revocation_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
   };
@@ -91,7 +92,7 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
     scopes_supported: scopesSupported,
     bearer_methods_supported: ['header'],
     resource_name: 'Actual Budget MCP Server',
-    logo_uri: BRAND_ICON_DATA_URI,
+    logo_uri: logoUrl,
   };
 
   const brandAssetsDir = path.resolve(

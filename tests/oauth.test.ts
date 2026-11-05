@@ -88,7 +88,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     expect(pathRes.body).toMatchObject({
       resource: 'https://mcp.example.com/mcp',
       authorization_servers: ['https://mcp.example.com'],
-      logo_uri: expect.stringMatching(/^data:image\/png;base64,/),
+      logo_uri: 'https://mcp.example.com/logo.png',
     });
 
     const rootRes = await request(app)
@@ -109,7 +109,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
       issuer: 'https://mcp.example.com',
-      logo_uri: expect.stringMatching(/^data:image\/png;base64,/),
+      logo_uri: 'https://mcp.example.com/logo.png',
       authorization_endpoint: 'https://mcp.example.com/authorize',
       token_endpoint: 'https://mcp.example.com/token',
       revocation_endpoint: 'https://mcp.example.com/revoke',
@@ -125,6 +125,29 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
         'client_secret_basic',
       ]),
     });
+  });
+
+  it('supports custom LOGO_URL override for external hosting providers (e.g. googleusercontent)', async () => {
+    const customConfig = loadConfig({
+      PUBLIC_URL: 'https://mcp.example.com',
+      LOGO_URL: 'https://lh3.googleusercontent.com/d/abc-123',
+      PORT: '3000',
+      DATA_DIR: tempDataDir,
+      OAUTH_CLIENT_ID: 'gemini-client',
+      OAUTH_CLIENT_SECRET: 'super-secret-value',
+      OAUTH_ADMIN_PASSWORD: 'correct-horse-battery-staple',
+      ACTUAL_SERVER_URL: 'http://localhost:5006',
+      ACTUAL_PASSWORD: 'actual-password',
+      ACTUAL_SYNC_ID: 'sync-id',
+    });
+    const app = createApp({ config: customConfig, budgetGateway: createStubGateway() });
+
+    const res = await request(app)
+      .get('/.well-known/oauth-authorization-server')
+      .set('Host', 'mcp.example.com');
+
+    expect(res.status).toBe(200);
+    expect(res.body.logo_uri).toBe('https://lh3.googleusercontent.com/d/abc-123');
   });
 
   it('validates client_id and allows Google connector redirect URI patterns plus OAUTH_EXTRA_REDIRECT_URIS on GET /authorize while rejecting unlisted redirect URIs', async () => {

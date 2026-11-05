@@ -45,6 +45,17 @@ import type {
   UpdateCategoryResult,
   UpdateTransactionInput,
   UpdateTransactionResult,
+  CreateRuleInput,
+  CreateScheduleInput,
+  GetScheduleDatesInput,
+  RuleAction,
+  RuleCondition,
+  RuleSummary,
+  ScheduleAmount,
+  ScheduleAmountOp,
+  ScheduleSummary,
+  UpdateRuleInput,
+  UpdateScheduleInput,
 } from './types.js';
 
 export interface ActualAccountRecord {
@@ -137,6 +148,35 @@ export interface ActualImportTransactionsResult {
   errors?: unknown[];
 }
 
+export interface ActualScheduleRecord {
+  id: string;
+  name?: string | null;
+  rule?: string;
+  next_date?: string | null;
+  completed?: boolean;
+  posts_transaction?: boolean;
+  payee?: string | null;
+  account?: string | null;
+  amount?: number | { num1: number; num2: number } | null;
+  amountOp?: ScheduleAmountOp | null;
+  date?: unknown;
+  _payee?: string | null;
+  _account?: string | null;
+  _amount?: number | { num1: number; num2: number } | null;
+  _amountOp?: ScheduleAmountOp | null;
+  _date?: unknown;
+}
+
+export interface ActualRuleRecord {
+  id: string;
+  stage?: 'pre' | 'post' | 'default' | null;
+  conditionsOp?: 'and' | 'or';
+  conditions_op?: 'and' | 'or';
+  conditions?: RuleCondition[];
+  actions?: RuleAction[];
+  [key: string]: unknown;
+}
+
 export interface ActualApiAdapter {
   init?(config: ActualInitConfig): Promise<unknown>;
   downloadBudget?(syncId: string, opts?: { password?: string }): Promise<void>;
@@ -212,6 +252,23 @@ export interface ActualApiAdapter {
   ): Promise<unknown>;
   reopenAccount?(id: string): Promise<unknown>;
   runBankSync?(args?: { accountId?: string }): Promise<unknown>;
+  getSchedules?(): Promise<ActualScheduleRecord[]>;
+  getScheduleDates?(
+    date: unknown,
+    options?: { start?: string; end?: string; count?: number },
+  ): Promise<string[]>;
+  createSchedule?(schedule: unknown): Promise<string>;
+  updateSchedule?(
+    id: string,
+    fields: unknown,
+    resetNextDate?: boolean,
+  ): Promise<unknown>;
+  deleteSchedule?(id: string): Promise<unknown>;
+  getRules?(): Promise<ActualRuleRecord[]>;
+  getPayeeRules?(id: string): Promise<ActualRuleRecord[]>;
+  createRule?(rule: unknown): Promise<ActualRuleRecord>;
+  updateRule?(rule: unknown): Promise<ActualRuleRecord>;
+  deleteRule?(id: string): Promise<unknown>;
   q?: typeof actualApi.q;
   aqlQuery?(query: ReturnType<typeof actualApi.q>): Promise<unknown>;
 }
@@ -284,6 +341,19 @@ export interface ActualBudgetGateway extends BudgetGateway {
   ): Promise<{ id: string }>;
   reopenAccount(id: string): Promise<{ id: string }>;
   runBankSync(accountId?: string): Promise<RunBankSyncResult>;
+  listSchedules(options?: { forceSync?: boolean }): Promise<ScheduleSummary[]>;
+  getScheduleDates(input: GetScheduleDatesInput): Promise<string[]>;
+  createSchedule(input: CreateScheduleInput): Promise<{ id: string }>;
+  updateSchedule(
+    id: string,
+    fields: UpdateScheduleInput,
+    resetNextDate?: boolean,
+  ): Promise<{ id: string }>;
+  deleteSchedule(id: string): Promise<{ id: string }>;
+  listRules(options?: { payeeId?: string; forceSync?: boolean }): Promise<RuleSummary[]>;
+  createRule(input: CreateRuleInput): Promise<RuleSummary>;
+  updateRule(input: UpdateRuleInput): Promise<RuleSummary>;
+  deleteRule(id: string): Promise<{ id: string }>;
   executeRead<T>(
     operation: (api: ActualApiAdapter) => Promise<T>,
     options?: { forceSync?: boolean },
@@ -291,6 +361,157 @@ export interface ActualBudgetGateway extends BudgetGateway {
   executeWrite<T>(operation: (api: ActualApiAdapter) => Promise<T>): Promise<T>;
   getSpendingSummary(input: GetSpendingSummaryInput): Promise<SpendingSummary>;
   runAqlQuery(input: StructuredAqlQueryInput): Promise<AqlQueryResult>;
+}
+
+function convertScheduleAmountToDecimal(
+  rawAmount: number | { num1: number; num2: number } | null | undefined,
+): ScheduleAmount | null {
+  if (typeof rawAmount === 'number') {
+    return minorToDecimalAmount(rawAmount);
+  }
+  if (
+    typeof rawAmount === 'object' &&
+    rawAmount !== null &&
+    'num1' in rawAmount &&
+    'num2' in rawAmount &&
+    typeof rawAmount.num1 === 'number' &&
+    typeof rawAmount.num2 === 'number'
+  ) {
+    return {
+      num1: minorToDecimalAmount(rawAmount.num1),
+      num2: minorToDecimalAmount(rawAmount.num2),
+    };
+  }
+  return null;
+}
+
+function convertScheduleAmountToMinor(amount: ScheduleAmount): number | { num1: number; num2: number } {
+  if (typeof amount === 'number') {
+    return toMinorUnits(amount);
+  }
+  return {
+    num1: toMinorUnits(amount.num1),
+    num2: toMinorUnits(amount.num2),
+  };
+}
+
+function formatScheduleSummary(rawSchedule: ActualScheduleRecord): ScheduleSummary {
+  const amount =
+    convertScheduleAmountToDecimal(rawSchedule.amount) ??
+    convertScheduleAmountToDecimal(rawSchedule._amount);
+
+  return {
+    id: rawSchedule.id,
+    name: rawSchedule.name ?? null,
+    rule: rawSchedule.rule ?? '',
+    next_date: rawSchedule.next_date ?? null,
+    completed: Boolean(rawSchedule.completed),
+    posts_transaction: Boolean(rawSchedule.posts_transaction),
+    payee: rawSchedule.payee ?? rawSchedule._payee ?? null,
+    account: rawSchedule.account ?? rawSchedule._account ?? null,
+    amount,
+    amountOp: rawSchedule.amountOp ?? rawSchedule._amountOp ?? null,
+    date: rawSchedule.date ?? rawSchedule._date ?? null,
+  };
+}
+
+function convertRuleConditionsToInternal(conditions: RuleCondition[]): RuleCondition[] {
+  return conditions.map((cond) => {
+    if (cond.field === 'amount') {
+      if (typeof cond.value === 'number') {
+        return { ...cond, value: toMinorUnits(cond.value) };
+      }
+      if (
+        typeof cond.value === 'object' &&
+        cond.value !== null &&
+        'num1' in cond.value &&
+        'num2' in cond.value &&
+        typeof (cond.value as { num1: unknown }).num1 === 'number' &&
+        typeof (cond.value as { num2: unknown }).num2 === 'number'
+      ) {
+        const val = cond.value as { num1: number; num2: number };
+        return {
+          ...cond,
+          value: {
+            num1: toMinorUnits(val.num1),
+            num2: toMinorUnits(val.num2),
+          },
+        };
+      }
+    }
+    return cond;
+  });
+}
+
+function convertRuleActionsToInternal(actions: RuleAction[]): RuleAction[] {
+  return actions.map((act) => {
+    if (
+      (act.op === 'set-split-amount' || (act.field === 'amount' && act.op === 'set')) &&
+      typeof act.value === 'number'
+    ) {
+      return { ...act, value: toMinorUnits(act.value) };
+    }
+    return act;
+  });
+}
+
+function convertRuleConditionsToExternal(conditions: RuleCondition[]): RuleCondition[] {
+  return conditions.map((cond) => {
+    if (cond.field === 'amount') {
+      if (typeof cond.value === 'number') {
+        return { ...cond, value: minorToDecimalAmount(cond.value) };
+      }
+      if (
+        typeof cond.value === 'object' &&
+        cond.value !== null &&
+        'num1' in cond.value &&
+        'num2' in cond.value &&
+        typeof (cond.value as { num1: unknown }).num1 === 'number' &&
+        typeof (cond.value as { num2: unknown }).num2 === 'number'
+      ) {
+        const val = cond.value as { num1: number; num2: number };
+        return {
+          ...cond,
+          value: {
+            num1: minorToDecimalAmount(val.num1),
+            num2: minorToDecimalAmount(val.num2),
+          },
+        };
+      }
+    }
+    return cond;
+  });
+}
+
+function convertRuleActionsToExternal(actions: RuleAction[]): RuleAction[] {
+  return actions.map((act) => {
+    if (
+      (act.op === 'set-split-amount' || (act.field === 'amount' && act.op === 'set')) &&
+      typeof act.value === 'number'
+    ) {
+      return { ...act, value: minorToDecimalAmount(act.value) };
+    }
+    return act;
+  });
+}
+
+function formatRuleSummary(rawRule: ActualRuleRecord): RuleSummary {
+  const conditions = Array.isArray(rawRule.conditions)
+    ? convertRuleConditionsToExternal(rawRule.conditions)
+    : [];
+  const actions = Array.isArray(rawRule.actions)
+    ? convertRuleActionsToExternal(rawRule.actions)
+    : [];
+  const conditionsOp = rawRule.conditionsOp ?? rawRule.conditions_op ?? 'and';
+  const stage = rawRule.stage === 'default' ? null : (rawRule.stage ?? null);
+
+  return {
+    id: rawRule.id,
+    stage,
+    conditionsOp,
+    conditions,
+    actions,
+  };
 }
 
 export function createActualBudgetGateway(
@@ -1376,6 +1597,147 @@ export function createActualBudgetGateway(
           matchedTransactionsCount,
           ...(errors ? { errors } : {}),
         };
+      });
+    },
+    async listSchedules(options?: { forceSync?: boolean }): Promise<ScheduleSummary[]> {
+      return executeRead(async (apiAdapter) => {
+        if (!apiAdapter.getSchedules) {
+          throw new Error('getSchedules is not supported by the current API adapter');
+        }
+        const rawSchedules = await apiAdapter.getSchedules();
+        return (rawSchedules ?? []).map(formatScheduleSummary);
+      }, options);
+    },
+    async getScheduleDates(input: GetScheduleDatesInput): Promise<string[]> {
+      return executeRead(async (apiAdapter) => {
+        if (!apiAdapter.getScheduleDates) {
+          throw new Error('getScheduleDates is not supported by the current API adapter');
+        }
+        let dateConfig = input.date;
+        if (!dateConfig && input.scheduleId) {
+          if (!apiAdapter.getSchedules) {
+            throw new Error('getSchedules is not supported by the current API adapter');
+          }
+          const rawSchedules = await apiAdapter.getSchedules();
+          const sched = (rawSchedules ?? []).find((s) => s.id === input.scheduleId);
+          if (!sched) {
+            throw new Error(`Schedule "${input.scheduleId}" not found`);
+          }
+          dateConfig = sched.date ?? sched._date;
+        }
+        if (!dateConfig) {
+          throw new Error('Either scheduleId or date must be provided');
+        }
+        const options: { start?: string; end?: string; count?: number } = {};
+        if (input.start) options.start = input.start;
+        if (input.end) options.end = input.end;
+        if (input.count !== undefined) {
+          options.count = input.count;
+        } else if (!input.end) {
+          options.count = 10;
+        }
+        return apiAdapter.getScheduleDates(dateConfig, options);
+      }, input);
+    },
+    async createSchedule(input: CreateScheduleInput): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.createSchedule) {
+          throw new Error('createSchedule is not supported by the current API adapter');
+        }
+        const minorAmount = convertScheduleAmountToMinor(input.amount);
+        const id = await apiAdapter.createSchedule({
+          name: input.name,
+          account: input.account,
+          payee: input.payee ?? null,
+          amount: minorAmount,
+          amountOp: input.amountOp ?? 'is',
+          date: input.date,
+          posts_transaction: input.posts_transaction ?? false,
+        });
+        return { id };
+      });
+    },
+    async updateSchedule(
+      id: string,
+      fields: UpdateScheduleInput,
+      resetNextDate?: boolean,
+    ): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.updateSchedule) {
+          throw new Error('updateSchedule is not supported by the current API adapter');
+        }
+        const internalFields: Record<string, unknown> = { ...fields };
+        if (fields.amount !== undefined) {
+          internalFields.amount = convertScheduleAmountToMinor(fields.amount);
+        }
+        await apiAdapter.updateSchedule(id, internalFields, resetNextDate);
+        return { id };
+      });
+    },
+    async deleteSchedule(id: string): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.deleteSchedule) {
+          throw new Error('deleteSchedule is not supported by the current API adapter');
+        }
+        await apiAdapter.deleteSchedule(id);
+        return { id };
+      });
+    },
+    async listRules(options?: { payeeId?: string; forceSync?: boolean }): Promise<RuleSummary[]> {
+      return executeRead(async (apiAdapter) => {
+        let rawRules: ActualRuleRecord[] = [];
+        if (options?.payeeId) {
+          if (!apiAdapter.getPayeeRules) {
+            throw new Error('getPayeeRules is not supported by the current API adapter');
+          }
+          rawRules = (await apiAdapter.getPayeeRules(options.payeeId)) ?? [];
+        } else {
+          if (!apiAdapter.getRules) {
+            throw new Error('getRules is not supported by the current API adapter');
+          }
+          rawRules = (await apiAdapter.getRules()) ?? [];
+        }
+        return rawRules.map(formatRuleSummary);
+      }, options);
+    },
+    async createRule(input: CreateRuleInput): Promise<RuleSummary> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.createRule) {
+          throw new Error('createRule is not supported by the current API adapter');
+        }
+        const payload = {
+          stage: input.stage ?? 'pre',
+          conditionsOp: input.conditionsOp ?? 'and',
+          conditions: convertRuleConditionsToInternal(input.conditions),
+          actions: convertRuleActionsToInternal(input.actions),
+        };
+        const created = await apiAdapter.createRule(payload);
+        return formatRuleSummary(created);
+      });
+    },
+    async updateRule(input: UpdateRuleInput): Promise<RuleSummary> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.updateRule) {
+          throw new Error('updateRule is not supported by the current API adapter');
+        }
+        const payload = {
+          id: input.id,
+          stage: input.stage ?? 'pre',
+          conditionsOp: input.conditionsOp ?? 'and',
+          conditions: convertRuleConditionsToInternal(input.conditions),
+          actions: convertRuleActionsToInternal(input.actions),
+        };
+        const updated = await apiAdapter.updateRule(payload);
+        return formatRuleSummary(updated);
+      });
+    },
+    async deleteRule(id: string): Promise<{ id: string }> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.deleteRule) {
+          throw new Error('deleteRule is not supported by the current API adapter');
+        }
+        await apiAdapter.deleteRule(id);
+        return { id };
       });
     },
   };

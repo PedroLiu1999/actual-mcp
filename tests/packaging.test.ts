@@ -121,11 +121,20 @@ describe('Packaging & deployment artifacts', () => {
       'set_budget_carryover',
       'hold_budget_for_next_month',
       'reset_budget_hold',
+      'list_schedules',
+      'get_schedule_upcoming_dates',
+      'create_schedule',
+      'update_schedule',
+      'delete_schedule',
+      'list_rules',
+      'create_rule',
+      'update_rule',
+      'delete_rule',
     ];
     for (const tool of expectedTools) {
       expect(readme).toContain(tool);
     }
-    expect(readme).toContain('all 30 MCP tools');
+    expect(readme).toContain('all 39 MCP tools');
 
     const expectedEnvVars = [
       'PUBLIC_URL',
@@ -152,12 +161,12 @@ describe('Packaging & deployment artifacts', () => {
     expect(readme).toContain('Client Secret');
   });
 
-  it('aligns version across package.json and src/mcp/server.ts to 0.2.1', () => {
+  it('aligns version across package.json and src/mcp/server.ts to 0.3.0', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
-    expect(pkg.version).toBe('0.2.1');
+    expect(pkg.version).toBe('0.3.0');
 
     const serverCode = fs.readFileSync(path.join(repoRoot, 'src/mcp/server.ts'), 'utf8');
-    expect(serverCode).toContain("version: '0.2.1'");
+    expect(serverCode).toContain("version: '0.3.0'");
   });
 
   it('defines a GitHub Actions CI pipeline (.github/workflows/ci.yml) with typecheck, test, and build across supported Node versions', () => {

@@ -64,6 +64,14 @@ _Avoid_: Expense report, transaction total
 A Zod-validated JSON representation of an ActualQL query (`table`, `filter`, `select`, `groupBy`, `orderBy`, `limit`, `offset`, `splits`) translated safely into `@actual-app/api`'s `q()` builder and executed via `aqlQuery()`.
 _Avoid_: Raw SQL, query string
 
+**Schedule**:
+A recurring transaction definition specifying an interval pattern (e.g. monthly, weekly), next occurrence date, amount, account, payee, and optional automatic transaction posting.
+_Avoid_: Subscription record, recurring task, calendar entry
+
+**Rule**:
+An automated transaction pipeline condition-and-action definition (e.g. stage, conditions, actions) that matches incoming or edited transactions and modifies fields such as category, notes, payee, or cleared status.
+_Avoid_: Trigger, automation script, webhook
+
 ### Access & Transport
 
 **Embedded OAuth Server**:

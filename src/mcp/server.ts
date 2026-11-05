@@ -22,6 +22,71 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
   ) as T;
 }
 
+const scheduleAmountSchema = z.union([
+  z
+    .number()
+    .finite()
+    .describe(
+      'Decimal Amount in standard major currency units (e.g. -50.00 for expense, 2500.00 for income).',
+    ),
+  z
+    .object({
+      num1: z.number().finite().describe('Lower bound Decimal Amount.'),
+      num2: z.number().finite().describe('Upper bound Decimal Amount.'),
+    })
+    .describe('Decimal Amount range for between operator.'),
+]);
+
+const scheduleDateSchema = z.union([
+  isoDateSchema.describe('Exact date in YYYY-MM-DD format.'),
+  z
+    .record(z.string(), z.unknown())
+    .describe(
+      'Recurrence configuration object (e.g. { frequency: "monthly", start: "2026-11-01" }).',
+    ),
+]);
+
+const ruleConditionSchema = z.object({
+  field: z
+    .string()
+    .describe(
+      'Field to match on (e.g. "payee", "amount", "notes", "account", "category", "date").',
+    ),
+  op: z
+    .string()
+    .describe(
+      'Operator (e.g. "is", "isNot", "contains", "doesNotContain", "matches", "gt", "gte", "lt", "lte", "isbetween", "isapprox", "oneOf", "notOneOf").',
+    ),
+  value: z
+    .unknown()
+    .describe(
+      'Comparison value. For "amount" conditions, supply standard Decimal Amount (e.g. -50.00) or { num1, num2 } range.',
+    ),
+  options: z
+    .unknown()
+    .optional()
+    .describe('Optional matching options (e.g. { inflow: boolean, outflow: boolean }).'),
+  type: z.string().optional(),
+});
+
+const ruleActionSchema = z.object({
+  field: z
+    .string()
+    .optional()
+    .describe('Target field to modify (e.g. "category", "notes", "cleared", "payee").'),
+  op: z
+    .string()
+    .describe(
+      'Action operator (e.g. "set", "set-split-amount", "link-schedule", "delete-transaction", "prepend-notes", "append-notes").',
+    ),
+  value: z
+    .unknown()
+    .optional()
+    .describe('Value to assign. For monetary actions, supply standard Decimal Amount.'),
+  options: z.unknown().optional().describe('Optional action options.'),
+  type: z.string().optional(),
+});
+
 import { BRAND_ICON_DATA_URI } from './icon.js';
 
 export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: string): McpServer {
@@ -36,7 +101,7 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
   const server = new McpServer(
     {
       name: 'actual-mcp',
-      version: '0.2.1',
+      version: '0.3.0',
       icons,
     },
     {
@@ -1341,6 +1406,408 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           {
             type: 'text',
             text: JSON.stringify({ success: true, month }, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'list_schedules',
+    {
+      title: 'List Schedules',
+      description:
+        'List all recurring schedules in the Target Budget with their ID, name, rule ID, next date, completed flag, posts transaction flag, payee ID, account ID, amount (Decimal Amount), amount operator, and recurrence date config.',
+      inputSchema: {
+        forceSync: z
+          .boolean()
+          .optional()
+          .describe('Force a sync with the Sync Server before reading schedules.'),
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+      },
+    },
+    async ({ forceSync }) => {
+      if (!budgetGateway.listSchedules) {
+        throw new Error('listSchedules is not supported by the configured BudgetGateway');
+      }
+      const schedules = await budgetGateway.listSchedules(
+        forceSync !== undefined ? { forceSync } : undefined,
+      );
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ schedules }, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'get_schedule_upcoming_dates',
+    {
+      title: 'Get Schedule Upcoming Dates',
+      description:
+        'Calculate upcoming occurrence dates for a schedule ID or date recurrence config over a given date range or occurrence count.',
+      inputSchema: {
+        scheduleId: z
+          .string()
+          .optional()
+          .describe('Schedule ID to expand upcoming dates for.'),
+        date: scheduleDateSchema
+          .optional()
+          .describe(
+            'Explicit date string or recurrence config object to expand if scheduleId is not provided.',
+          ),
+        start: isoDateSchema
+          .optional()
+          .describe('Inclusive start date in YYYY-MM-DD format (defaults to today).'),
+        end: isoDateSchema
+          .optional()
+          .describe('Inclusive end date in YYYY-MM-DD format.'),
+        count: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe(
+            'Number of upcoming occurrences to calculate (default 10 if end is omitted).',
+          ),
+        forceSync: z
+          .boolean()
+          .optional()
+          .describe('Force a sync with the Sync Server before reading.'),
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.getScheduleDates) {
+        throw new Error('getScheduleDates is not supported by the configured BudgetGateway');
+      }
+      const filter = stripUndefined(args);
+      const dates = await budgetGateway.getScheduleDates(filter);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ dates }, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'create_schedule',
+    {
+      title: 'Create Schedule',
+      description:
+        'Create a new recurring schedule in the Target Budget with Decimal Amounts, recurrence configuration, and linked account/payee.',
+      inputSchema: {
+        name: z
+          .string()
+          .optional()
+          .describe('Display name for the recurring schedule (e.g. "Rent", "Netflix").'),
+        account: z
+          .string()
+          .describe('Account ID the schedule is associated with.'),
+        payee: z
+          .string()
+          .optional()
+          .describe('Payee ID the schedule is associated with.'),
+        amount: scheduleAmountSchema.describe(
+          'Schedule monetary amount as a Decimal Amount (negative for expense/Outflow, positive for income/Inflow) or between range { num1, num2 }.',
+        ),
+        amountOp: z
+          .enum(['is', 'isapprox', 'isbetween'])
+          .optional()
+          .describe('Amount match operator: "is", "isapprox", or "isbetween" (default: "is").'),
+        date: scheduleDateSchema.describe(
+          'Recurrence config object (e.g. { frequency: "monthly", start: "2026-11-01" }) or exact date string.',
+        ),
+        posts_transaction: z
+          .boolean()
+          .optional()
+          .describe(
+            'Whether Actual should automatically post transactions for this schedule (default: false).',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.createSchedule) {
+        throw new Error('createSchedule is not supported by the configured BudgetGateway');
+      }
+      const result = await budgetGateway.createSchedule(args);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'update_schedule',
+    {
+      title: 'Update Schedule',
+      description:
+        'Update fields on an existing recurring schedule (name, amount as Decimal Amount, amountOp, payee, account, date, posts_transaction, resetNextDate).',
+      inputSchema: {
+        id: z.string().describe('Schedule ID to update.'),
+        name: z.string().optional().describe('New schedule name.'),
+        account: z.string().optional().describe('New account ID.'),
+        payee: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('New payee ID (or null to clear).'),
+        amount: scheduleAmountSchema
+          .optional()
+          .describe('New Decimal Amount or range.'),
+        amountOp: z
+          .enum(['is', 'isapprox', 'isbetween'])
+          .optional()
+          .describe('New amount operator.'),
+        date: scheduleDateSchema
+          .optional()
+          .describe('New recurrence config or date.'),
+        posts_transaction: z
+          .boolean()
+          .optional()
+          .describe('Toggle automatic transaction posting.'),
+        resetNextDate: z
+          .boolean()
+          .optional()
+          .describe(
+            'Recalculate next occurrence date based on current day and date pattern.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async ({ id, resetNextDate, ...fields }) => {
+      if (!budgetGateway.updateSchedule) {
+        throw new Error('updateSchedule is not supported by the configured BudgetGateway');
+      }
+      const strippedFields = stripUndefined(fields);
+      const result = await budgetGateway.updateSchedule(id, strippedFields, resetNextDate);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'delete_schedule',
+    {
+      title: 'Delete Schedule',
+      description:
+        'Permanently delete a recurring schedule from the Target Budget.',
+      inputSchema: {
+        id: z.string().describe('Schedule ID to delete.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async ({ id }) => {
+      if (!budgetGateway.deleteSchedule) {
+        throw new Error('deleteSchedule is not supported by the configured BudgetGateway');
+      }
+      const result = await budgetGateway.deleteSchedule(id);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ success: true, id: result.id }, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'list_rules',
+    {
+      title: 'List Automation Rules',
+      description:
+        'List all automation/categorization rules in the Target Budget with conditions, actions, stage, and operator, with optional payee filtering.',
+      inputSchema: {
+        payeeId: z
+          .string()
+          .optional()
+          .describe('Filter rules associated with a specific payee ID.'),
+        forceSync: z
+          .boolean()
+          .optional()
+          .describe('Force a sync with the Sync Server before reading rules.'),
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+      },
+    },
+    async ({ payeeId, forceSync }) => {
+      if (!budgetGateway.listRules) {
+        throw new Error('listRules is not supported by the configured BudgetGateway');
+      }
+      const rules = await budgetGateway.listRules({
+        ...(payeeId ? { payeeId } : {}),
+        ...(forceSync !== undefined ? { forceSync } : {}),
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ rules }, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'create_rule',
+    {
+      title: 'Create Automation Rule',
+      description:
+        'Create a new automation rule for categorization, payee renaming, or transaction field manipulation.',
+      inputSchema: {
+        stage: z
+          .enum(['pre', 'post', 'default'])
+          .optional()
+          .describe(
+            'Rule execution stage: "pre" (import/creation), "post", or "default" (default: "pre").',
+          ),
+        conditionsOp: z
+          .enum(['and', 'or'])
+          .optional()
+          .describe(
+            'Condition logical combination operator: "and" (all must match) or "or" (any must match). Default: "and".',
+          ),
+        conditions: z
+          .array(ruleConditionSchema)
+          .min(1)
+          .describe('List of rule conditions.'),
+        actions: z
+          .array(ruleActionSchema)
+          .min(1)
+          .describe('List of rule actions to execute when conditions match.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.createRule) {
+        throw new Error('createRule is not supported by the configured BudgetGateway');
+      }
+      const rule = await budgetGateway.createRule(args);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ rule }, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'update_rule',
+    {
+      title: 'Update Automation Rule',
+      description:
+        'Update conditions, actions, stage, or conditionsOp for an existing automation rule by ID.',
+      inputSchema: {
+        id: z.string().describe('Rule ID to update.'),
+        stage: z
+          .enum(['pre', 'post', 'default'])
+          .optional()
+          .describe('Updated execution stage.'),
+        conditionsOp: z
+          .enum(['and', 'or'])
+          .optional()
+          .describe('Updated condition combination operator.'),
+        conditions: z
+          .array(ruleConditionSchema)
+          .min(1)
+          .describe('Complete list of updated rule conditions.'),
+        actions: z
+          .array(ruleActionSchema)
+          .min(1)
+          .describe('Complete list of updated rule actions.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.updateRule) {
+        throw new Error('updateRule is not supported by the configured BudgetGateway');
+      }
+      const rule = await budgetGateway.updateRule(args);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ rule }, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'delete_rule',
+    {
+      title: 'Delete Automation Rule',
+      description:
+        'Permanently delete an automation rule from the Target Budget.',
+      inputSchema: {
+        id: z.string().describe('Rule ID to delete.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async ({ id }) => {
+      if (!budgetGateway.deleteRule) {
+        throw new Error('deleteRule is not supported by the configured BudgetGateway');
+      }
+      const result = await budgetGateway.deleteRule(id);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ success: true, id: result.id }, null, 2),
           },
         ],
       };

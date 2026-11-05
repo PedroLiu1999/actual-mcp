@@ -35,7 +35,7 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
                                                                    |                        v                          |
                                                                    |  +---------------------------------------------+  |
                                                                    |  | Stateless Streamable HTTP Transport (/mcp)  |  |
-                                                                   |  | - 30 MCP Tools (8 Read, 22 Write)           |  |
+                                                                   |  | - 39 MCP Tools (11 Read, 28 Write)          |  |
                                                                    |  | - Decimal Amount <-> Minor Unit conversion  |  |
                                                                    |  +---------------------------------------------+  |
                                                                    |                        |                          |
@@ -75,9 +75,9 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 
 ---
 
-## MCP Tools Reference (all 30 MCP tools & extended lifecycle capabilities)
+## MCP Tools Reference (all 39 MCP tools & extended lifecycle capabilities)
 
-`actual-mcp` v0.2.0 documents and provides all 30 MCP tools (8 read, 22 write across Categories, Category Groups, Payees, Accounts, Bank Sync, and Budget Adjustments). All tools return structured JSON serialized in MCP text content blocks and include MCP safety annotations (`readOnlyHint`, `destructiveHint`).
+`actual-mcp` v0.3.0 documents and provides all 39 MCP tools (11 read, 28 write across Categories, Category Groups, Payees, Accounts, Bank Sync, Budget Adjustments, Recurring Schedules, and Automation Rules). All tools return structured JSON serialized in MCP text content blocks and include MCP safety annotations (`readOnlyHint`, `destructiveHint`).
 
 ### Read Tools (`readOnlyHint: true`, `destructiveHint: false`)
 
@@ -91,6 +91,9 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 | `list_payees` | List all payees (`id`, `name`, `transfer_acct`). | `forceSync?` (`boolean`) |
 | `list_budget_months` | List available `YYYY-MM` **Budget Months** in the **Target Budget**. | `forceSync?` (`boolean`) |
 | `get_budget_month` | Inspect a `YYYY-MM` **Budget Month** envelope summary (`toBudget`, `totalIncome`, `totalBudgeted`, `totalSpent`, `totalBalance`, and per-category `budgeted`, `spent`, `balance`, `carryover` in **Decimal Amounts**). | `month` (`YYYY-MM`, required), `forceSync?` (`boolean`) |
+| `list_schedules` | List all recurring schedules in the **Target Budget** with ID, name, rule ID, next date, completed flag, posts transaction flag, payee ID, account ID, **Decimal Amount**, amount operator, and recurrence date config. | `forceSync?` (`boolean`) |
+| `get_schedule_upcoming_dates` | Calculate upcoming occurrence dates for a schedule ID or date recurrence config over a given date range or count. | `scheduleId?` (`string`), `date?` (`string \| object`), `start?` (`YYYY-MM-DD`), `end?` (`YYYY-MM-DD`), `count?` (`number`, 1..100, default 10), `forceSync?` (`boolean`) |
+| `list_rules` | List all automation/categorization rules in the **Target Budget** with conditions, actions, stage, and operator, with optional payee filtering. Amounts in conditions and actions are converted to **Decimal Amounts**. | `payeeId?` (`string`), `forceSync?` (`boolean`) |
 
 ### Write & Lifecycle Tools (`readOnlyHint: false`)
 
@@ -145,6 +148,22 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 | `set_budget_carryover` | `false` | Set the carryover flag for a category envelope in a specified budget month (`YYYY-MM`). When true, overspent category balance rolls over into the next month. | `month` (`YYYY-MM`, required), `categoryId` (`string`, min 1, required), `carryover` (`boolean`, required) |
 | `hold_budget_for_next_month` | `false` | Hold a specified **Decimal Amount** from the current month available budget for next month. | `month` (`YYYY-MM`, required), `amount` (`number`, finite Decimal Amount, required) |
 | `reset_budget_hold` | `false` | Reset the budget hold for a given month, releasing held budget hold funds back to the current month available budget. | `month` (`YYYY-MM`, required) |
+
+#### Recurring Schedules Suite (v0.3.0)
+
+| Tool | Destructive | Description | Parameters |
+| :--- | :---: | :--- | :--- |
+| `create_schedule` | `false` | Create a recurring schedule in the Target Budget with **Decimal Amounts**, recurrence configuration, and linked payee/account. | `name?` (`string`), `account` (`string`, required), `payee?` (`string`), `amount` (`number \| { num1, num2 }`, Decimal Amount, required), `amountOp?` (`'is' \| 'isapprox' \| 'isbetween'`), `date` (`string \| object`, required), `posts_transaction?` (`boolean`) |
+| `update_schedule` | `false` | Update fields on an existing recurring schedule (name, amount as Decimal Amount, amountOp, payee, account, date, posts_transaction, resetNextDate). | `id` (`string`, required), `name?` (`string`), `account?` (`string`), `payee?` (`string \| null`), `amount?` (`number \| { num1, num2 }`), `amountOp?` (`'is' \| 'isapprox' \| 'isbetween'`), `date?` (`string \| object`), `posts_transaction?` (`boolean`), `resetNextDate?` (`boolean`) |
+| `delete_schedule` | `true` | Permanently delete a recurring schedule from the Target Budget. | `id` (`string`, required) |
+
+#### Automation Rules Suite (v0.3.0)
+
+| Tool | Destructive | Description | Parameters |
+| :--- | :---: | :--- | :--- |
+| `create_rule` | `false` | Create a new automation rule for categorization, payee renaming, or field setting. Converts any monetary condition/action values from **Decimal Amounts** to Minor Units. | `stage?` (`'pre' \| 'post' \| 'default'`), `conditionsOp?` (`'and' \| 'or'`), `conditions` (`Array<{ field, op, value, options? }>`, min 1, required), `actions` (`Array<{ field?, op, value?, options? }>`, min 1, required) |
+| `update_rule` | `false` | Update conditions, actions, stage, or conditionsOp for an existing automation rule by ID. | `id` (`string`, required), `stage?` (`'pre' \| 'post' \| 'default'`), `conditionsOp?` (`'and' \| 'or'`), `conditions` (`Array<{ field, op, value, options? }>`, min 1, required), `actions` (`Array<{ field?, op, value?, options? }>`, min 1, required) |
+| `delete_rule` | `true` | Permanently delete an automation rule from the Target Budget. | `id` (`string`, required) |
 
 ---
 

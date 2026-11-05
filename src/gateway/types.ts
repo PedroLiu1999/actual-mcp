@@ -321,6 +321,97 @@ export interface RunBankSyncResult {
   errors?: string[];
 }
 
+export type ScheduleAmountOp = 'is' | 'isapprox' | 'isbetween';
+
+export type ScheduleAmount = number | { num1: number; num2: number };
+
+export interface ScheduleSummary {
+  id: string;
+  name: string | null;
+  rule: string;
+  next_date: string | null;
+  completed: boolean;
+  posts_transaction: boolean;
+  payee: string | null;
+  account: string | null;
+  /** Schedule amount expressed as a Decimal Amount (number or between range { num1, num2 }). */
+  amount: ScheduleAmount | null;
+  amountOp: ScheduleAmountOp | null;
+  date: unknown;
+}
+
+export interface CreateScheduleInput {
+  name?: string;
+  account: string;
+  payee?: string | null;
+  /** Decimal Amount */
+  amount: ScheduleAmount;
+  amountOp?: ScheduleAmountOp;
+  date: unknown;
+  posts_transaction?: boolean;
+}
+
+export interface UpdateScheduleInput {
+  name?: string;
+  account?: string;
+  payee?: string | null;
+  /** Decimal Amount */
+  amount?: ScheduleAmount;
+  amountOp?: ScheduleAmountOp;
+  date?: unknown;
+  posts_transaction?: boolean;
+}
+
+export interface GetScheduleDatesInput {
+  scheduleId?: string;
+  date?: unknown;
+  start?: string;
+  end?: string;
+  count?: number;
+  forceSync?: boolean;
+}
+
+export interface RuleCondition {
+  field: string;
+  op: string;
+  value?: unknown;
+  options?: unknown;
+  type?: string;
+  [key: string]: unknown;
+}
+
+export interface RuleAction {
+  field?: string;
+  op: string;
+  value?: unknown;
+  options?: unknown;
+  type?: string;
+  [key: string]: unknown;
+}
+
+export interface RuleSummary {
+  id: string;
+  stage: 'pre' | 'post' | 'default' | null;
+  conditionsOp: 'and' | 'or';
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+}
+
+export interface CreateRuleInput {
+  stage?: 'pre' | 'post' | 'default';
+  conditionsOp?: 'and' | 'or';
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+}
+
+export interface UpdateRuleInput {
+  id: string;
+  stage?: 'pre' | 'post' | 'default';
+  conditionsOp?: 'and' | 'or';
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+}
+
 export interface BudgetGateway {
   getReadiness(): BudgetReadiness;
   listAccounts(options?: { forceSync?: boolean }): Promise<AccountSummary[]>;
@@ -370,6 +461,19 @@ export interface BudgetGateway {
   ): Promise<{ id: string }>;
   reopenAccount?(id: string): Promise<{ id: string }>;
   runBankSync?(accountId?: string): Promise<RunBankSyncResult>;
+  listSchedules?(options?: { forceSync?: boolean }): Promise<ScheduleSummary[]>;
+  getScheduleDates?(input: GetScheduleDatesInput): Promise<string[]>;
+  createSchedule?(input: CreateScheduleInput): Promise<{ id: string }>;
+  updateSchedule?(
+    id: string,
+    fields: UpdateScheduleInput,
+    resetNextDate?: boolean,
+  ): Promise<{ id: string }>;
+  deleteSchedule?(id: string): Promise<{ id: string }>;
+  listRules?(options?: { payeeId?: string; forceSync?: boolean }): Promise<RuleSummary[]>;
+  createRule?(input: CreateRuleInput): Promise<RuleSummary>;
+  updateRule?(input: UpdateRuleInput): Promise<RuleSummary>;
+  deleteRule?(id: string): Promise<{ id: string }>;
   initialize?(): Promise<void>;
   sync?(): Promise<void>;
   shutdown?(): Promise<void>;

@@ -88,7 +88,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     expect(pathRes.body).toMatchObject({
       resource: 'https://mcp.example.com/mcp',
       authorization_servers: ['https://mcp.example.com'],
-      logo_uri: 'https://mcp.example.com/logo.png',
+      logo_uri: expect.stringMatching(/^data:image\/png;base64,/),
     });
 
     const rootRes = await request(app)
@@ -109,7 +109,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
       issuer: 'https://mcp.example.com',
-      logo_uri: 'https://mcp.example.com/logo.png',
+      logo_uri: expect.stringMatching(/^data:image\/png;base64,/),
       authorization_endpoint: 'https://mcp.example.com/authorize',
       token_endpoint: 'https://mcp.example.com/token',
       revocation_endpoint: 'https://mcp.example.com/revoke',

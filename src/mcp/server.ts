@@ -24,22 +24,13 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
 
 import { BRAND_ICON_DATA_URI } from './icon.js';
 
-export function createMcpServer(budgetGateway: BudgetGateway, publicUrl?: string): McpServer {
+export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: string): McpServer {
   const icons = [
     {
       src: BRAND_ICON_DATA_URI,
       mimeType: 'image/png',
-      sizes: ['128x128'],
+      sizes: ['128x128', '512x512'],
     },
-    ...(publicUrl
-      ? [
-          {
-            src: `${publicUrl}/logo.png`,
-            mimeType: 'image/png',
-            sizes: ['512x512'],
-          },
-        ]
-      : []),
   ];
 
   const server = new McpServer(

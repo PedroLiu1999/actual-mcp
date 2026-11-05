@@ -202,12 +202,7 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
       {
         src: expect.stringMatching(/^data:image\/png;base64,/),
         mimeType: 'image/png',
-        sizes: ['128x128'],
-      },
-      {
-        src: 'https://mcp.example.com/logo.png',
-        mimeType: 'image/png',
-        sizes: ['512x512'],
+        sizes: ['128x128', '512x512'],
       },
     ]);
     expect(res.body.result.instructions).toEqual(expect.any(String));

@@ -280,6 +280,31 @@ export interface DeleteCategoryGroupResult {
   success: boolean;
 }
 
+export interface CreatePayeeInput {
+  name: string;
+}
+
+export interface CreatePayeeResult {
+  id: string;
+}
+
+export interface UpdatePayeeInput {
+  name?: string;
+}
+
+export interface UpdatePayeeResult {
+  id: string;
+}
+
+export interface DeletePayeeResult {
+  id: string;
+}
+
+export interface MergePayeesResult {
+  targetId: string;
+  mergedCount: number;
+}
+
 export interface BudgetGateway {
   getReadiness(): BudgetReadiness;
   listAccounts(options?: { forceSync?: boolean }): Promise<AccountSummary[]>;
@@ -310,6 +335,10 @@ export interface BudgetGateway {
   ): Promise<void>;
   holdBudgetForNextMonth?(month: string, amount: number): Promise<boolean>;
   resetBudgetHold?(month: string): Promise<void>;
+  createPayee?(payee: { name: string }): Promise<{ id: string }>;
+  updatePayee?(id: string, fields: { name?: string }): Promise<{ id: string }>;
+  deletePayee?(id: string): Promise<{ id: string }>;
+  mergePayees?(targetId: string, mergeIds: string[]): Promise<{ targetId: string; mergedCount: number }>;
   initialize?(): Promise<void>;
   sync?(): Promise<void>;
   shutdown?(): Promise<void>;

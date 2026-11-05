@@ -1208,6 +1208,139 @@ describe('BudgetGateway seam — category and category group mutations & cache i
     expect(events).toEqual(['api:sync', 'api:deleteCategoryGroup:grp-new-1:cat-general', 'api:sync']);
   });
 
+  it('caches listPayees in-memory, serves cache within TTL, and invalidates on forceSync or sync', async () => {
+    let syncCount = 0;
+    let getPayeesCount = 0;
+    let currentTime = 100000;
+
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      sync: async () => {
+        syncCount++;
+      },
+      getPayees: async () => {
+        getPayeesCount++;
+        return [
+          { id: 'p1', name: 'Payee One' },
+          { id: 'p2', name: 'Payee Two', transfer_acct: 'acct-1' },
+        ];
+      },
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+      syncTtlSeconds: 30,
+      now: () => currentTime,
+    });
+
+    // 1st call: initial sync + read, populates cache
+    const payees1 = await gateway.listPayees();
+    expect(payees1).toEqual([
+      { id: 'p1', name: 'Payee One', transfer_acct: null },
+      { id: 'p2', name: 'Payee Two', transfer_acct: 'acct-1' },
+    ]);
+    expect(syncCount).toBe(1);
+    expect(getPayeesCount).toBe(1);
+
+    // 2nd call: within TTL, should serve from cache without calling getPayees or sync
+    currentTime += 10000; // 10s later
+    const payees2 = await gateway.listPayees();
+    expect(payees2).toEqual(payees1);
+    expect(syncCount).toBe(1);
+    expect(getPayeesCount).toBe(1);
+
+    // 3rd call: forceSync should invalidate cache and re-read
+    const payees3 = await gateway.listPayees({ forceSync: true });
+    expect(payees3).toEqual(payees1);
+    expect(syncCount).toBe(2);
+    expect(getPayeesCount).toBe(2);
+
+    // 4th call: manual sync() should invalidate cache
+    await gateway.sync();
+    expect(syncCount).toBe(3);
+
+    await gateway.listPayees();
+    expect(getPayeesCount).toBe(3);
+  });
+
+  it('creates, updates, deletes, and merges payees with Coalesced Sync before/after and invalidates in-memory payee cache', async () => {
+    const events: string[] = [];
+
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      sync: async () => {
+        events.push('api:sync');
+      },
+      getPayees: async () => {
+        events.push('api:getPayees');
+        return [{ id: 'p1', name: 'Payee One' }];
+      },
+      createPayee: async (payee) => {
+        events.push(`api:createPayee:${payee.name}`);
+        return 'payee-new-1';
+      },
+      updatePayee: async (id, fields) => {
+        events.push(`api:updatePayee:${id}:${JSON.stringify(fields)}`);
+      },
+      deletePayee: async (id) => {
+        events.push(`api:deletePayee:${id}`);
+      },
+      mergePayees: async (targetId, mergeIds) => {
+        events.push(`api:mergePayees:${targetId}:${JSON.stringify(mergeIds)}`);
+      },
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+      syncTtlSeconds: 60,
+    });
+
+    // Populate payee cache
+    await gateway.listPayees();
+    expect(events).toEqual(['api:sync', 'api:getPayees']);
+
+    // createPayee
+    events.length = 0;
+    const createRes = await gateway.createPayee!({ name: 'Costco Wholesale' });
+    expect(createRes).toEqual({ id: 'payee-new-1' });
+    expect(events).toEqual(['api:sync', 'api:createPayee:Costco Wholesale', 'api:sync']);
+
+    // Next listPayees must re-fetch due to cache invalidation
+    events.length = 0;
+    await gateway.listPayees();
+    expect(events).toContain('api:getPayees');
+
+    // updatePayee
+    events.length = 0;
+    const updateRes = await gateway.updatePayee!('payee-new-1', { name: 'Costco' });
+    expect(updateRes).toEqual({ id: 'payee-new-1' });
+    expect(events).toEqual([
+      'api:sync',
+      'api:updatePayee:payee-new-1:{"name":"Costco"}',
+      'api:sync',
+    ]);
+
+    // deletePayee
+    events.length = 0;
+    const deleteRes = await gateway.deletePayee!('payee-old');
+    expect(deleteRes).toEqual({ id: 'payee-old' });
+    expect(events).toEqual(['api:sync', 'api:deletePayee:payee-old', 'api:sync']);
+
+    // mergePayees
+    events.length = 0;
+    const mergeRes = await gateway.mergePayees!('payee-target', ['payee-src-1', 'payee-src-2']);
+    expect(mergeRes).toEqual({ targetId: 'payee-target', mergedCount: 2 });
+    expect(events).toEqual([
+      'api:sync',
+      'api:mergePayees:payee-target:["payee-src-1","payee-src-2"]',
+      'api:sync',
+    ]);
+  });
+
   describe('Budget flow adjustment methods', () => {
     it('executes setBudgetCarryover within executeWrite (sync before, call, sync after)', async () => {
       const events: string[] = [];
@@ -1342,6 +1475,7 @@ describe('BudgetGateway seam — category and category group mutations & cache i
         gateway.resetBudgetHold!('2026-11'),
       ).rejects.toThrow('resetBudgetHold is not supported by the current API adapter');
     });
+  });
   });
 });
 

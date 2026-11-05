@@ -4,11 +4,11 @@
 
 **Blocked by:** 01: Category and Category Group Management Tools
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `create_payee` accepts a `name` string and returns the created payee record with its generated ID.
-- [ ] `update_payee` accepts `id` and a replacement `name`, updating the merchant title.
-- [ ] `delete_payee` accepts `id` and deletes the payee, annotated with `destructiveHint: true`.
-- [ ] `merge_payees` accepts `targetPayeeId` and a non-empty array of `sourcePayeeIds`, consolidating all transactions and rules under the target payee and removing source records.
-- [ ] All payee mutations trigger an upstream Coalesced Sync and invalidate the cached payees list.
-- [ ] End-to-end HTTP integration tests pass exercising payee creation, updating, deletion, and merging via JSON-RPC `tools/call`.
+- [x] `create_payee` accepts a `name` string and returns the created payee record with its generated ID.
+- [x] `update_payee` accepts `id` and a replacement `name`, updating the merchant title.
+- [x] `delete_payee` accepts `id` and deletes the payee, annotated with `destructiveHint: true`.
+- [x] `merge_payees` accepts `targetPayeeId` and a non-empty array of `sourcePayeeIds`, consolidating all transactions and rules under the target payee and removing source records.
+- [x] All payee mutations trigger an upstream Coalesced Sync and invalidate the cached payees list.
+- [x] End-to-end HTTP integration tests pass exercising payee creation, updating, deletion, and merging via JSON-RPC `tools/call`.

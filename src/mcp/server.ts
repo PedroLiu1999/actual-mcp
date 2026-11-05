@@ -882,6 +882,133 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
   );
 
   server.registerTool(
+    'create_payee',
+    {
+      title: 'Create Payee',
+      description: 'Create a new payee with a name string and return its generated ID.',
+      inputSchema: {
+        name: z.string().min(1).describe('Name of the new payee.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.createPayee) {
+        throw new Error('createPayee is not supported by the configured BudgetGateway');
+      }
+      const result = await budgetGateway.createPayee({ name: args.name });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'update_payee',
+    {
+      title: 'Update Payee',
+      description: 'Update an existing payee name.',
+      inputSchema: {
+        id: z.string().min(1).describe('Target payee ID to update.'),
+        name: z.string().min(1).describe('New name for the payee.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.updatePayee) {
+        throw new Error('updatePayee is not supported by the configured BudgetGateway');
+      }
+      const result = await budgetGateway.updatePayee(args.id, { name: args.name });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'delete_payee',
+    {
+      title: 'Delete Payee',
+      description: 'Delete an existing payee.',
+      inputSchema: {
+        id: z.string().min(1).describe('Target payee ID to delete.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.deletePayee) {
+        throw new Error('deletePayee is not supported by the configured BudgetGateway');
+      }
+      const result = await budgetGateway.deletePayee(args.id);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'merge_payees',
+    {
+      title: 'Merge Payees',
+      description:
+        'Merge one or more duplicate source payees into a canonical target payee, consolidating all transactions and rules under the target payee and removing source records.',
+      inputSchema: {
+        targetPayeeId: z.string().min(1).describe('Canonical target payee ID to keep.'),
+        sourcePayeeIds: z
+          .array(z.string().min(1))
+          .min(1)
+          .describe(
+            'Non-empty array of source payee IDs to merge into target and delete.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.mergePayees) {
+        throw new Error('mergePayees is not supported by the configured BudgetGateway');
+      }
+      const result = await budgetGateway.mergePayees(
+        args.targetPayeeId,
+        args.sourcePayeeIds,
+      );
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
     'set_budget_carryover',
     {
       title: 'Set Budget Carryover',

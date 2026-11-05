@@ -185,4 +185,16 @@ describe('Packaging & deployment artifacts', () => {
     expect(ciContent).toContain('node-version: [22.x, 24.x]');
     expect(ciContent).toContain('dist/index.js');
   });
+
+  it('defines a GitHub Actions release pipeline (.github/workflows/release.yml) on tag pushes', () => {
+    const releasePath = path.join(repoRoot, '.github/workflows/release.yml');
+    expect(fs.existsSync(releasePath)).toBe(true);
+
+    const releaseContent = fs.readFileSync(releasePath, 'utf8');
+    expect(releaseContent).toContain('push:');
+    expect(releaseContent).toContain('tags:');
+    expect(releaseContent).toContain("v*.*.*");
+    expect(releaseContent).toContain('action-gh-release');
+    expect(releaseContent).toContain('generate_release_notes: true');
+  });
 });

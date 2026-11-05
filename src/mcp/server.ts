@@ -22,24 +22,31 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
   ) as T;
 }
 
+import { BRAND_ICON_DATA_URI } from './icon.js';
+
 export function createMcpServer(budgetGateway: BudgetGateway, publicUrl?: string): McpServer {
-  const logoUrl = publicUrl ? `${publicUrl}/logo.png` : undefined;
+  const icons = [
+    {
+      src: BRAND_ICON_DATA_URI,
+      mimeType: 'image/png',
+      sizes: ['128x128'],
+    },
+    ...(publicUrl
+      ? [
+          {
+            src: `${publicUrl}/logo.png`,
+            mimeType: 'image/png',
+            sizes: ['512x512'],
+          },
+        ]
+      : []),
+  ];
 
   const server = new McpServer(
     {
       name: 'actual-mcp',
       version: '0.1.0',
-      ...(logoUrl
-        ? {
-            icons: [
-              {
-                src: logoUrl,
-                mimeType: 'image/png',
-                sizes: ['512x512', '128x128'],
-              },
-            ],
-          }
-        : {}),
+      icons,
     },
     {
       instructions:

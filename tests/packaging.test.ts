@@ -175,6 +175,7 @@ describe('Packaging & deployment artifacts', () => {
 
     const ciContent = fs.readFileSync(ciPath, 'utf8');
     expect(ciContent).toContain('push:');
+    expect(ciContent).toContain('tags:');
     expect(ciContent).toContain('pull_request:');
     expect(ciContent).toContain('main');
     expect(ciContent).toContain('npm ci');

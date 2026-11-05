@@ -8,6 +8,14 @@
 
 # actual-mcp
 
+<p align="center">
+  <a href="https://github.com/PedroLiu1999/actual-mcp/actions/workflows/ci.yml"><img src="https://github.com/PedroLiu1999/actual-mcp/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/PedroLiu1999/actual-mcp/actions/workflows/docker-publish.yml"><img src="https://github.com/PedroLiu1999/actual-mcp/actions/workflows/docker-publish.yml/badge.svg" alt="Docker"></a>
+  <a href="https://github.com/PedroLiu1999/actual-mcp/releases"><img src="https://img.shields.io/github/v/release/PedroLiu1999/actual-mcp?color=blue&label=version" alt="GitHub Release"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg" alt="Node Version"></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-Streamable%20HTTP-blueviolet.svg" alt="Model Context Protocol"></a>
+</p>
+
 A self-contained Model Context Protocol (MCP) server that connects a self-hosted [Actual Budget](https://actualbudget.org/) instance to **Google Gemini** over **Streamable HTTP** (`POST /mcp`) and an **Embedded OAuth Server** (OAuth 2.1 Authorization Code + PKCE).
 
 Designed for single-user VPS deployments where `actual-server` and `cloudflared` (Cloudflare Tunnel) are already running, `actual-mcp` packages the `@actual-app/api` (`loot-core`) Node.js engine, a persistent local SQLite **Budget Cache**, and a zero-dependency **Embedded OAuth Server** into a single lightweight Docker container.

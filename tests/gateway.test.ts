@@ -1032,6 +1032,183 @@ describe('BudgetGateway seam — createActualBudgetGateway getTransactions', () 
   });
 });
 
+describe('BudgetGateway seam — category and category group mutations & cache invalidation', () => {
+  it('creates, updates, and deletes categories with Coalesced Sync before/after and invalidates in-memory category cache', async () => {
+    const events: string[] = [];
+    let categoryGroupsList = [
+      {
+        id: 'group-1',
+        name: 'Daily Living',
+        is_income: false,
+        hidden: false,
+        categories: [
+          { id: 'cat-1', name: 'Groceries', group_id: 'group-1', is_income: false, hidden: false },
+        ],
+      },
+    ];
+
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      sync: async () => {
+        events.push('api:sync');
+      },
+      getCategoryGroups: async () => {
+        events.push('api:getCategoryGroups');
+        return categoryGroupsList;
+      },
+      createCategory: async (category) => {
+        events.push(`api:createCategory:${category.name}`);
+        return 'cat-new-1';
+      },
+      updateCategory: async (id, fields) => {
+        events.push(`api:updateCategory:${id}:${JSON.stringify(fields)}`);
+      },
+      deleteCategory: async (id, transferCategoryId) => {
+        events.push(`api:deleteCategory:${id}:${transferCategoryId}`);
+      },
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+      syncTtlSeconds: 60,
+    });
+
+    // Initial read populates the in-memory categories cache
+    const initial = await gateway.listCategories();
+    expect(initial).toHaveLength(1);
+    expect(events).toEqual(['api:sync', 'api:getCategoryGroups']);
+
+    // Second read within TTL uses cached categories (no new api:getCategoryGroups call)
+    events.length = 0;
+    const second = await gateway.listCategories();
+    expect(second).toEqual(initial);
+    expect(events).toEqual([]);
+
+    // createCategory triggers sync before, executes mutation, syncs after, invalidates cache
+    events.length = 0;
+    const createRes = await gateway.createCategory!({
+      name: 'Coffee',
+      groupId: 'group-1',
+      isIncome: false,
+      hidden: false,
+    });
+    expect(createRes).toEqual({ id: 'cat-new-1' });
+    expect(events).toEqual(['api:sync', 'api:createCategory:Coffee', 'api:sync']);
+
+    // Subsequent listCategories must bypass cache and fetch fresh state
+    categoryGroupsList = [
+      {
+        id: 'group-1',
+        name: 'Daily Living',
+        is_income: false,
+        hidden: false,
+        categories: [
+          { id: 'cat-1', name: 'Groceries', group_id: 'group-1', is_income: false, hidden: false },
+          { id: 'cat-new-1', name: 'Coffee', group_id: 'group-1', is_income: false, hidden: false },
+        ],
+      },
+    ];
+    events.length = 0;
+    const afterCreate = await gateway.listCategories();
+    expect(afterCreate[0].categories).toHaveLength(2);
+    expect(events).toEqual(['api:getCategoryGroups']);
+
+    // updateCategory maps groupId to group_id and invalidates cache
+    events.length = 0;
+    const updateRes = await gateway.updateCategory!({
+      id: 'cat-new-1',
+      name: 'Specialty Coffee',
+      groupId: 'group-1',
+      hidden: true,
+    });
+    expect(updateRes).toEqual({ id: 'cat-new-1', success: true });
+    expect(events).toEqual([
+      'api:sync',
+      'api:updateCategory:cat-new-1:{"name":"Specialty Coffee","group_id":"group-1","hidden":true}',
+      'api:sync',
+    ]);
+
+    // deleteCategory forwards transferCategoryId and invalidates cache
+    events.length = 0;
+    const deleteRes = await gateway.deleteCategory!({
+      id: 'cat-new-1',
+      transferCategoryId: 'cat-1',
+    });
+    expect(deleteRes).toEqual({ id: 'cat-new-1', success: true });
+    expect(events).toEqual(['api:sync', 'api:deleteCategory:cat-new-1:cat-1', 'api:sync']);
+  });
+
+  it('creates, updates, and deletes category groups with Coalesced Sync before/after and invalidates in-memory category cache', async () => {
+    const events: string[] = [];
+
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      sync: async () => {
+        events.push('api:sync');
+      },
+      getCategoryGroups: async () => {
+        events.push('api:getCategoryGroups');
+        return [];
+      },
+      createCategoryGroup: async (group) => {
+        events.push(`api:createCategoryGroup:${group.name}`);
+        return 'grp-new-1';
+      },
+      updateCategoryGroup: async (id, fields) => {
+        events.push(`api:updateCategoryGroup:${id}:${JSON.stringify(fields)}`);
+      },
+      deleteCategoryGroup: async (id, transferCategoryId) => {
+        events.push(`api:deleteCategoryGroup:${id}:${transferCategoryId}`);
+      },
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+      syncTtlSeconds: 60,
+    });
+
+    // Populate cache
+    await gateway.listCategories();
+
+    // createCategoryGroup
+    events.length = 0;
+    const createRes = await gateway.createCategoryGroup!({
+      name: 'Investments',
+      isIncome: false,
+      hidden: false,
+    });
+    expect(createRes).toEqual({ id: 'grp-new-1' });
+    expect(events).toEqual(['api:sync', 'api:createCategoryGroup:Investments', 'api:sync']);
+
+    // updateCategoryGroup
+    events.length = 0;
+    const updateRes = await gateway.updateCategoryGroup!({
+      id: 'grp-new-1',
+      name: 'Retirement & Investments',
+      hidden: true,
+    });
+    expect(updateRes).toEqual({ id: 'grp-new-1', success: true });
+    expect(events).toEqual([
+      'api:sync',
+      'api:updateCategoryGroup:grp-new-1:{"name":"Retirement & Investments","hidden":true}',
+      'api:sync',
+    ]);
+
+    // deleteCategoryGroup
+    events.length = 0;
+    const deleteRes = await gateway.deleteCategoryGroup!({
+      id: 'grp-new-1',
+      transferCategoryId: 'cat-general',
+    });
+    expect(deleteRes).toEqual({ id: 'grp-new-1', success: true });
+    expect(events).toEqual(['api:sync', 'api:deleteCategoryGroup:grp-new-1:cat-general', 'api:sync']);
+  });
+});
+
 
 
 

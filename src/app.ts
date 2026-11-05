@@ -100,20 +100,27 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
     '../docs/assets/logo/dist',
   );
 
+  const sendBrandAsset = (res: express.Response, filename: string, contentType?: string) => {
+    if (contentType) {
+      res.type(contentType);
+    }
+    res.sendFile(path.join(brandAssetsDir, filename), { dotfiles: 'allow' });
+  };
+
   app.get('/favicon.ico', (_req, res) => {
-    res.type('image/x-icon').sendFile(path.join(brandAssetsDir, 'favicon.ico'));
+    sendBrandAsset(res, 'favicon.ico', 'image/x-icon');
   });
 
   app.get('/logo.png', (_req, res) => {
-    res.type('image/png').sendFile(path.join(brandAssetsDir, 'logo.png'));
+    sendBrandAsset(res, 'logo.png', 'image/png');
   });
 
   app.get('/apple-touch-icon.png', (_req, res) => {
-    res.type('image/png').sendFile(path.join(brandAssetsDir, 'apple-touch-icon.png'));
+    sendBrandAsset(res, 'apple-touch-icon.png', 'image/png');
   });
 
   app.get('/logo.svg', (_req, res) => {
-    res.type('image/svg+xml; charset=utf-8').sendFile(path.join(brandAssetsDir, 'logo.svg'));
+    sendBrandAsset(res, 'logo.svg', 'image/svg+xml; charset=utf-8');
   });
 
   app.use(

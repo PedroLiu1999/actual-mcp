@@ -629,5 +629,257 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     },
   );
 
+  server.registerTool(
+    'create_category',
+    {
+      title: 'Create Category',
+      description:
+        'Create a new envelope category under an existing category group.',
+      inputSchema: {
+        name: z.string().min(1).describe('Name of the new category.'),
+        groupId: z.string().min(1).describe('Parent category group ID.'),
+        isIncome: z
+          .boolean()
+          .optional()
+          .describe('Whether this category represents an income stream.'),
+        hidden: z
+          .boolean()
+          .optional()
+          .describe('Whether the category should be hidden from active budget views.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.createCategory) {
+        throw new Error(
+          'createCategory is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.createCategory(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'update_category',
+    {
+      title: 'Update Category',
+      description:
+        'Update an existing envelope category (rename, move to a different category group, or toggle income/hidden flags).',
+      inputSchema: {
+        id: z.string().min(1).describe('Target category ID to update.'),
+        name: z.string().min(1).optional().describe('New name for the category.'),
+        groupId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('New parent category group ID to move the category into.'),
+        isIncome: z
+          .boolean()
+          .optional()
+          .describe('Whether this category represents an income stream.'),
+        hidden: z
+          .boolean()
+          .optional()
+          .describe('Whether the category should be hidden from active budget views.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.updateCategory) {
+        throw new Error(
+          'updateCategory is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.updateCategory(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'delete_category',
+    {
+      title: 'Delete Category',
+      description:
+        'Delete an existing envelope category. If the category has historical transactions, transferCategoryId must be provided to reassign them without orphaned records.',
+      inputSchema: {
+        id: z.string().min(1).describe('Target category ID to delete.'),
+        transferCategoryId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Destination category ID to safely reassign historical transactions to before deleting.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.deleteCategory) {
+        throw new Error(
+          'deleteCategory is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.deleteCategory(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'create_category_group',
+    {
+      title: 'Create Category Group',
+      description:
+        'Create a new category group to organize related expense or income envelopes.',
+      inputSchema: {
+        name: z.string().min(1).describe('Name of the new category group.'),
+        isIncome: z
+          .boolean()
+          .optional()
+          .describe('Whether this group holds income categories.'),
+        hidden: z
+          .boolean()
+          .optional()
+          .describe('Whether the category group should be hidden.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.createCategoryGroup) {
+        throw new Error(
+          'createCategoryGroup is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.createCategoryGroup(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'update_category_group',
+    {
+      title: 'Update Category Group',
+      description:
+        'Update an existing category group (rename or toggle income/hidden flags).',
+      inputSchema: {
+        id: z.string().min(1).describe('Target category group ID to update.'),
+        name: z.string().min(1).optional().describe('New name for the category group.'),
+        isIncome: z
+          .boolean()
+          .optional()
+          .describe('Whether this group holds income categories.'),
+        hidden: z
+          .boolean()
+          .optional()
+          .describe('Whether the category group should be hidden.'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.updateCategoryGroup) {
+        throw new Error(
+          'updateCategoryGroup is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.updateCategoryGroup(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'delete_category_group',
+    {
+      title: 'Delete Category Group',
+      description:
+        'Delete an existing category group. If any contained categories have transactions, transferCategoryId must be provided to reassign them without orphaned records.',
+      inputSchema: {
+        id: z.string().min(1).describe('Target category group ID to delete.'),
+        transferCategoryId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Destination category ID to reassign transactions from member categories to before deleting the group.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.deleteCategoryGroup) {
+        throw new Error(
+          'deleteCategoryGroup is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.deleteCategoryGroup(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
   return server;
 }

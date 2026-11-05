@@ -224,6 +224,12 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
         }
 
         const clientId = client.client_id ?? randomUUID();
+        if (this.tokenStore.getClient(clientId)) {
+          throw new InvalidClientMetadataError(
+            'Cannot overwrite existing client registration',
+          );
+        }
+
         const registered: OAuthClientInformationFull = {
           ...client,
           client_id: clientId,

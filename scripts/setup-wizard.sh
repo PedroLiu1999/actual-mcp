@@ -109,12 +109,13 @@ _existing() {
   printf '%s' "$value"
 }
 
-# ask KEY "Prompt" reads a value into $KEY. Offers the existing .env value as
+# ask KEY "Prompt" [DEFAULT_OVERRIDE] reads a value into $KEY. Offers the existing .env value (or DEFAULT_OVERRIDE) as
 # a default on re-runs (Enter keeps it). Visible input (non-secret), edited
 # with Readline. Fails at EOF with no input.
 ask() {
-  local key="$1" prompt="$2" current input s=$'\001' e=$'\002' p rc=0
+  local key="$1" prompt="$2" default_override="${3:-}" current input s=$'\001' e=$'\002' p rc=0
   current=$(_existing "$key" || true)
+  [[ -n "$default_override" ]] && current="$default_override"
   # Readline needs the colour codes wrapped in \001..\002 to place the cursor.
   p="  $s$BOLD$e$prompt$s$RESET$e "
   [[ -n "$current" ]] && p+="$s$DIM$e[Enter keeps: $current]$s$RESET$e "
@@ -265,12 +266,10 @@ EXISTING_REDIRECTS=$(_existing "OAUTH_ALLOWED_REDIRECT_URIS" || true)
 ENV_EXAMPLE_REDIRECTS=$(grep -E '^OAUTH_ALLOWED_REDIRECT_URIS=' .env.example 2>/dev/null | cut -d= -f2- | tr -d "'" | tr -d '"' || true)
 DEFAULT_REDIRECTS="${ENV_EXAMPLE_REDIRECTS:-http://localhost,http://127.0.0.1,https://oauth-redirect.googleusercontent.com/r/,https://oauth-redirect.googleusercontent.com/a/,https://vertexaisearch.cloud.google.com/oauth-redirect}"
 if [[ -z "$EXISTING_REDIRECTS" || "$EXISTING_REDIRECTS" == "http://localhost,http://127.0.0.1" ]]; then
-  SUGGESTED_REDIRECTS="$DEFAULT_REDIRECTS"
+  ask OAUTH_ALLOWED_REDIRECT_URIS "Allowed Redirect URIs:" "$DEFAULT_REDIRECTS"
 else
-  SUGGESTED_REDIRECTS="$EXISTING_REDIRECTS"
+  ask OAUTH_ALLOWED_REDIRECT_URIS "Allowed Redirect URIs:"
 fi
-ask OAUTH_ALLOWED_REDIRECT_URIS "Allowed Redirect URIs [${SUGGESTED_REDIRECTS}]:"
-OAUTH_ALLOWED_REDIRECT_URIS="${OAUTH_ALLOWED_REDIRECT_URIS:-$SUGGESTED_REDIRECTS}"
 write_env OAUTH_ALLOWED_REDIRECT_URIS "$OAUTH_ALLOWED_REDIRECT_URIS"
 
 # ── Stage 3: Actual Budget Sync Server ─────────────────────────────────────

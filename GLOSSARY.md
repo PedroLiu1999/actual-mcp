@@ -75,9 +75,9 @@ _Avoid_: Trigger, automation script, webhook
 ### Access & Transport
 
 **Embedded OAuth Server**:
-The built-in single-tenant OAuth 2.1 Authorization and Resource Server running inside `actual-mcp` that authenticates MCP clients via PKCE, dynamic client IDs, an explicit redirect URI allowlist, and an admin consent passphrase.
+The built-in single-tenant OAuth 2.1 Authorization and Resource Server running inside `actual-mcp` that authenticates MCP clients via PKCE, RFC 7591 dynamic client registration (`/register`), on-the-fly dynamic client IDs, an explicit redirect URI allowlist, and an admin consent passphrase.
 _Avoid_: External IdP, OAuth proxy
 
 **Token Store**:
-The persistent JSON file (`/data/oauth-tokens.json`) inside the container's data volume that stores issued access tokens and non-rotating refresh tokens across container restarts.
+The persistent JSON file (`/data/oauth-tokens.json`) inside the container's data volume that stores issued access tokens, non-rotating refresh tokens, and dynamically registered client records across container restarts.
 _Avoid_: Session store, auth DB

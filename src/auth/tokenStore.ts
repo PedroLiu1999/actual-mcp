@@ -142,10 +142,6 @@ export class FileTokenStore {
     return this.clients.get(clientId);
   }
 
-  getAllClients(): OAuthClientInformationFull[] {
-    return Array.from(this.clients.values());
-  }
-
   saveTokens(access: StoredAccessToken, refresh?: StoredRefreshToken): void {
     this.accessTokens.set(access.token, access);
     if (refresh) {

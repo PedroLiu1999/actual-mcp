@@ -15,7 +15,10 @@ import type {
 } from '@modelcontextprotocol/sdk/shared/auth.js';
 import express, { type Express } from 'express';
 import { rateLimit } from 'express-rate-limit';
-import { EmbeddedOAuthProvider } from './auth/provider.js';
+import {
+  EmbeddedOAuthProvider,
+  SUPPORTED_TOKEN_ENDPOINT_AUTH_METHODS,
+} from './auth/provider.js';
 import type { AppConfig } from './config.js';
 import type { BudgetGateway } from './gateway/types.js';
 import { BRAND_ICON_DATA_URI } from './mcp/icon.js';
@@ -52,8 +55,8 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
     }),
     issuer: config.PUBLIC_URL,
     logo_uri: logoUrl,
-    token_endpoint_auth_methods_supported: ['none'],
-    revocation_endpoint_auth_methods_supported: ['none'],
+    token_endpoint_auth_methods_supported: Array.from(SUPPORTED_TOKEN_ENDPOINT_AUTH_METHODS),
+    revocation_endpoint_auth_methods_supported: Array.from(SUPPORTED_TOKEN_ENDPOINT_AUTH_METHODS),
   };
 
   const protectedResourceMetadata: OAuthProtectedResourceMetadata = {
@@ -129,8 +132,40 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
     next();
   });
 
-  app.use('/token', express.urlencoded({ extended: false }));
-  app.use('/revoke', express.urlencoded({ extended: false }));
+  const basicAuthToBody = (
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader && /^Basic\s+/i.test(authHeader)) {
+      try {
+        const credentials = Buffer.from(authHeader.replace(/^Basic\s+/i, '').trim(), 'base64').toString('utf8');
+        const colonIdx = credentials.indexOf(':');
+        if (colonIdx !== -1) {
+          const clientId = decodeURIComponent(credentials.slice(0, colonIdx));
+          const clientSecret = decodeURIComponent(credentials.slice(colonIdx + 1));
+          if (req.body && typeof req.body === 'object') {
+            if (req.body.client_secret || (req.body.client_id && req.body.client_id !== clientId)) {
+              res.status(400).json({
+                error: 'invalid_request',
+                error_description: 'Multiple client authentication methods found in request',
+              });
+              return;
+            }
+            req.body.client_id = clientId;
+            req.body.client_secret = clientSecret;
+          }
+        }
+      } catch {
+        // Ignore parse error; downstream clientAuth will handle missing/invalid credentials
+      }
+    }
+    next();
+  };
+
+  app.use('/token', express.urlencoded({ extended: false }), basicAuthToBody);
+  app.use('/revoke', express.urlencoded({ extended: false }), basicAuthToBody);
 
   app.use(
     mcpAuthRouter({

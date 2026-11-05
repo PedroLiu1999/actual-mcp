@@ -115,8 +115,8 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       response_types_supported: ['code'],
       grant_types_supported: expect.arrayContaining(['authorization_code', 'refresh_token']),
       code_challenge_methods_supported: ['S256'],
-      token_endpoint_auth_methods_supported: ['none'],
-      revocation_endpoint_auth_methods_supported: ['none'],
+      token_endpoint_auth_methods_supported: expect.arrayContaining(['none', 'client_secret_post', 'client_secret_basic']),
+      revocation_endpoint_auth_methods_supported: expect.arrayContaining(['none', 'client_secret_post', 'client_secret_basic']),
     });
   });
 
@@ -722,7 +722,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     expect(tokenRes.body.token_type).toBe('bearer');
     expect(tokenRes.body.access_token).toEqual(expect.any(String));
 
-    // 6. Reject confidential client registration since actual-mcp is public client PKCE only
+    // 6. Support confidential client registration with auto-generated client_secret
     const registerConfidentialRes = await request(appRestarted)
       .post('/register')
       .set('Host', 'mcp.example.com')
@@ -732,8 +732,188 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
         redirect_uris: ['http://localhost:54321/callback'],
         token_endpoint_auth_method: 'client_secret_post',
       });
-    expect(registerConfidentialRes.status).toBe(400);
-    expect(registerConfidentialRes.body.error).toBe('invalid_client_metadata');
+    expect(registerConfidentialRes.status).toBe(201);
+    expect(registerConfidentialRes.body.client_id).toEqual(expect.any(String));
+    expect(registerConfidentialRes.body.client_secret).toEqual(expect.any(String));
+    expect(registerConfidentialRes.body.client_secret.length).toBeGreaterThanOrEqual(32);
+    expect(registerConfidentialRes.body.token_endpoint_auth_method).toBe('client_secret_post');
+
+    const confidentialClientId = registerConfidentialRes.body.client_id;
+    const confidentialClientSecret = registerConfidentialRes.body.client_secret;
+
+    // Verify confidential client secret is persisted in oauth-tokens.json
+    const storeDataAfterConfidential = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+    const savedConfidential = storeDataAfterConfidential.clients.find(
+      (c: { client_id: string }) => c.client_id === confidentialClientId,
+    );
+    expect(savedConfidential).toBeDefined();
+    expect(savedConfidential.client_secret).toBe(confidentialClientSecret);
+    expect(savedConfidential.token_endpoint_auth_method).toBe('client_secret_post');
+
+    // Reject unknown/unsupported auth methods
+    const registerUnsupportedRes = await request(appRestarted)
+      .post('/register')
+      .set('Host', 'mcp.example.com')
+      .set('Content-Type', 'application/json')
+      .send({
+        client_name: 'Unsupported Auth Client',
+        redirect_uris: ['http://localhost:54321/callback'],
+        token_endpoint_auth_method: 'tls_client_auth',
+      });
+    expect(registerUnsupportedRes.status).toBe(400);
+    expect(registerUnsupportedRes.body.error).toBe('invalid_client_metadata');
+
+    // Confidential client authorizes with admin passphrase and exchanges token with secret
+    const confAuthRes = await request(appRestarted)
+      .post('/authorize')
+      .set('Host', 'mcp.example.com')
+      .type('form')
+      .send({
+        client_id: confidentialClientId,
+        redirect_uri: 'http://localhost:54321/callback',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        response_type: 'code',
+        state: 'conf-state',
+        passphrase: 'correct-horse-battery-staple',
+      });
+    expect(confAuthRes.status).toBe(302);
+    const confAuthCode = new URL(confAuthRes.headers.location).searchParams.get('code');
+    expect(confAuthCode).toBeTruthy();
+
+    // Exchange fails if client_secret is missing or incorrect
+    const badSecretTokenRes = await request(appRestarted)
+      .post('/token')
+      .set('Host', 'mcp.example.com')
+      .type('form')
+      .send({
+        grant_type: 'authorization_code',
+        client_id: confidentialClientId,
+        client_secret: 'wrong-secret',
+        code: confAuthCode!,
+        code_verifier: codeVerifier,
+        redirect_uri: 'http://localhost:54321/callback',
+      });
+    expect(badSecretTokenRes.status).toBe(400);
+    expect(badSecretTokenRes.body.error).toBe('invalid_client');
+
+    // Exchange succeeds with valid client_secret in POST body
+    const goodSecretTokenRes = await request(appRestarted)
+      .post('/token')
+      .set('Host', 'mcp.example.com')
+      .type('form')
+      .send({
+        grant_type: 'authorization_code',
+        client_id: confidentialClientId,
+        client_secret: confidentialClientSecret,
+        code: confAuthCode!,
+        code_verifier: codeVerifier,
+        redirect_uri: 'http://localhost:54321/callback',
+      });
+    expect(goodSecretTokenRes.status).toBe(200);
+    expect(goodSecretTokenRes.body.token_type).toBe('bearer');
+    expect(goodSecretTokenRes.body.access_token).toEqual(expect.any(String));
+
+    // Also support Basic Auth header for token exchange
+    // Obtain another code for the confidential client
+    const confAuthRes2 = await request(appRestarted)
+      .post('/authorize')
+      .set('Host', 'mcp.example.com')
+      .type('form')
+      .send({
+        client_id: confidentialClientId,
+        redirect_uri: 'http://localhost:54321/callback',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        response_type: 'code',
+        state: 'conf-state-2',
+        passphrase: 'correct-horse-battery-staple',
+      });
+    const confAuthCode2 = new URL(confAuthRes2.headers.location).searchParams.get('code');
+    expect(confAuthCode2).toBeTruthy();
+
+    const basicAuthCredentials = Buffer.from(
+      `${encodeURIComponent(confidentialClientId)}:${encodeURIComponent(confidentialClientSecret)}`,
+    ).toString('base64');
+
+    const basicAuthTokenRes = await request(appRestarted)
+      .post('/token')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Basic ${basicAuthCredentials}`)
+      .type('form')
+      .send({
+        grant_type: 'authorization_code',
+        code: confAuthCode2!,
+        code_verifier: codeVerifier,
+        redirect_uri: 'http://localhost:54321/callback',
+      });
+    expect(basicAuthTokenRes.status).toBe(200);
+    expect(basicAuthTokenRes.body.access_token).toEqual(expect.any(String));
+
+    // Reject conflicting multiple auth methods per RFC 6749 §2.3
+    const conflictingAuthTokenRes = await request(appRestarted)
+      .post('/token')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Basic ${basicAuthCredentials}`)
+      .type('form')
+      .send({
+        grant_type: 'authorization_code',
+        client_secret: 'body-secret',
+        code: confAuthCode2!,
+        code_verifier: codeVerifier,
+        redirect_uri: 'http://localhost:54321/callback',
+      });
+    expect(conflictingAuthTokenRes.status).toBe(400);
+    expect(conflictingAuthTokenRes.body.error).toBe('invalid_request');
+
+    // Confidential client token revocation requires valid client_secret
+    const badSecretRevokeRes = await request(appRestarted)
+      .post('/revoke')
+      .set('Host', 'mcp.example.com')
+      .type('form')
+      .send({
+        token: basicAuthTokenRes.body.access_token,
+        client_id: confidentialClientId,
+        client_secret: 'wrong-secret',
+      });
+    expect(badSecretRevokeRes.status).toBe(400);
+    expect(badSecretRevokeRes.body.error).toBe('invalid_client');
+
+    const goodSecretRevokeRes = await request(appRestarted)
+      .post('/revoke')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `basic ${basicAuthCredentials}`)
+      .type('form')
+      .send({
+        token: basicAuthTokenRes.body.access_token,
+      });
+    expect(goodSecretRevokeRes.status).toBe(200);
+
+    // Dynamic registration variants: client_secret_basic and omitted token_endpoint_auth_method
+    const registerBasicRes = await request(appRestarted)
+      .post('/register')
+      .set('Host', 'mcp.example.com')
+      .set('Content-Type', 'application/json')
+      .send({
+        client_name: 'Basic Client',
+        redirect_uris: ['http://localhost:54321/callback'],
+        token_endpoint_auth_method: 'client_secret_basic',
+      });
+    expect(registerBasicRes.status).toBe(201);
+    expect(registerBasicRes.body.client_secret).toBeDefined();
+    expect(registerBasicRes.body.token_endpoint_auth_method).toBe('client_secret_basic');
+
+    const registerDefaultRes = await request(appRestarted)
+      .post('/register')
+      .set('Host', 'mcp.example.com')
+      .set('Content-Type', 'application/json')
+      .send({
+        client_name: 'Default Client (omitted auth method)',
+        redirect_uris: ['http://localhost:54321/callback'],
+      });
+    expect(registerDefaultRes.status).toBe(201);
+    expect(registerDefaultRes.body.client_secret).toBeDefined();
+    expect(registerDefaultRes.body.token_endpoint_auth_method).toBe('client_secret_post');
 
     // 7. Prevent cross-client redirect URI leakage
     // Client A registers with a dedicated specific path

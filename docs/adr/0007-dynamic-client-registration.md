@@ -1,6 +1,6 @@
 # RFC 7591 Dynamic Client Registration and Well-Known Callback Allowlist Defaults
 
-> **Status**: Accepted (Amends [ADR-0006](0006-public-client-pkce-oauth.md))
+> **Status**: Accepted (Amends [ADR-0006](0006-public-client-pkce-oauth.md); Amended by [ADR-0008](0008-confidential-and-public-client-oauth.md))
 
 ## Context
 

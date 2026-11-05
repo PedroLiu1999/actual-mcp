@@ -30,7 +30,7 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 
 ## MCP Tools Reference (all 39 MCP tools & extended lifecycle capabilities)
 
-`actual-mcp` v0.4.1 documents and provides all 39 MCP tools (11 read, 28 write across Categories, Category Groups, Payees, Accounts, Bank Sync, Budget Adjustments, Recurring Schedules, and Automation Rules). All tools return structured JSON serialized in MCP text content blocks and include MCP safety annotations (`readOnlyHint`, `destructiveHint`).
+`actual-mcp` v0.4.2 documents and provides all 39 MCP tools (11 read, 28 write across Categories, Category Groups, Payees, Accounts, Bank Sync, Budget Adjustments, Recurring Schedules, and Automation Rules). All tools return structured JSON serialized in MCP text content blocks and include MCP safety annotations (`readOnlyHint`, `destructiveHint`).
 
 ### Read Tools (`readOnlyHint: true`, `destructiveHint: false`)
 

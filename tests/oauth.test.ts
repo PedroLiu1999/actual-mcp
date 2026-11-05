@@ -115,8 +115,8 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       response_types_supported: ['code'],
       grant_types_supported: expect.arrayContaining(['authorization_code', 'refresh_token']),
       code_challenge_methods_supported: ['S256'],
-      token_endpoint_auth_methods_supported: expect.arrayContaining(['none']),
-      revocation_endpoint_auth_methods_supported: expect.arrayContaining(['none']),
+      token_endpoint_auth_methods_supported: ['none'],
+      revocation_endpoint_auth_methods_supported: ['none'],
     });
   });
 
@@ -721,5 +721,75 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     expect(tokenRes.status).toBe(200);
     expect(tokenRes.body.token_type).toBe('bearer');
     expect(tokenRes.body.access_token).toEqual(expect.any(String));
+
+    // 6. Reject confidential client registration since actual-mcp is public client PKCE only
+    const registerConfidentialRes = await request(appRestarted)
+      .post('/register')
+      .set('Host', 'mcp.example.com')
+      .set('Content-Type', 'application/json')
+      .send({
+        client_name: 'Confidential Client',
+        redirect_uris: ['http://localhost:54321/callback'],
+        token_endpoint_auth_method: 'client_secret_post',
+      });
+    expect(registerConfidentialRes.status).toBe(400);
+    expect(registerConfidentialRes.body.error).toBe('invalid_client_metadata');
+
+    // 7. Prevent cross-client redirect URI leakage
+    // Client A registers with a dedicated specific path
+    const registerDedicatedRes = await request(appRestarted)
+      .post('/register')
+      .set('Host', 'mcp.example.com')
+      .set('Content-Type', 'application/json')
+      .send({
+        client_name: 'Client Dedicated',
+        redirect_uris: ['http://localhost:54321/client-dedicated-only'],
+        token_endpoint_auth_method: 'none',
+      });
+    expect(registerDedicatedRes.status).toBe(201);
+    const dedicatedClientId = registerDedicatedRes.body.client_id;
+
+    // A different unregistered on-the-fly client should not have client-dedicated-only in its allowed list if base config has an explicit path
+    const configWithExplicitPath = loadConfig({
+      PUBLIC_URL: 'https://mcp.example.com',
+      PORT: '3000',
+      DATA_DIR: tempDataDir,
+      OAUTH_ADMIN_PASSWORD: 'correct-horse-battery-staple',
+      OAUTH_ALLOWED_REDIRECT_URIS: 'http://localhost/global-callback',
+      ACTUAL_SERVER_URL: 'http://localhost:5006',
+      ACTUAL_PASSWORD: 'actual-password',
+      ACTUAL_SYNC_ID: '11111111-2222-3333-4444-555555555555',
+    });
+    const appExplicit = createApp({ config: configWithExplicitPath, budgetGateway: createStubGateway() });
+
+    // An unknown on-the-fly client trying to use dedicatedClientId's URI must be rejected
+    const authLeakAttemptRes = await request(appExplicit)
+      .post('/authorize')
+      .set('Host', 'mcp.example.com')
+      .type('form')
+      .send({
+        client_id: 'unknown-client-other',
+        redirect_uri: 'http://localhost/client-dedicated-only',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        response_type: 'code',
+        passphrase: 'correct-horse-battery-staple',
+      });
+    expect(authLeakAttemptRes.status).toBe(400);
+
+    // 8. Reject normalized path traversal in prefix matching
+    const authTraversalAttemptRes = await request(appRestarted)
+      .post('/authorize')
+      .set('Host', 'mcp.example.com')
+      .type('form')
+      .send({
+        client_id: publicClientId,
+        redirect_uri: 'https://oauth-redirect.googleusercontent.com/r/../evil',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        response_type: 'code',
+        passphrase: 'correct-horse-battery-staple',
+      });
+    expect(authTraversalAttemptRes.status).toBe(400);
   });
 });

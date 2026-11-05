@@ -262,9 +262,15 @@ write_env OAUTH_ADMIN_PASSWORD "$OAUTH_ADMIN_PASSWORD"
 printf '\n'
 say "Configure allowed OAuth redirect URIs (loopback ports and well-known callbacks pre-configured)."
 EXISTING_REDIRECTS=$(_existing "OAUTH_ALLOWED_REDIRECT_URIS" || true)
-DEFAULT_REDIRECTS="http://localhost,http://127.0.0.1,https://oauth-redirect.googleusercontent.com/r/,https://oauth-redirect.googleusercontent.com/a/,https://vertexaisearch.cloud.google.com/oauth-redirect"
-ask OAUTH_ALLOWED_REDIRECT_URIS "Allowed Redirect URIs [${EXISTING_REDIRECTS:-$DEFAULT_REDIRECTS}]:"
-OAUTH_ALLOWED_REDIRECT_URIS="${OAUTH_ALLOWED_REDIRECT_URIS:-${EXISTING_REDIRECTS:-$DEFAULT_REDIRECTS}}"
+ENV_EXAMPLE_REDIRECTS=$(grep -E '^OAUTH_ALLOWED_REDIRECT_URIS=' .env.example 2>/dev/null | cut -d= -f2- | tr -d "'" | tr -d '"' || true)
+DEFAULT_REDIRECTS="${ENV_EXAMPLE_REDIRECTS:-http://localhost,http://127.0.0.1,https://oauth-redirect.googleusercontent.com/r/,https://oauth-redirect.googleusercontent.com/a/,https://vertexaisearch.cloud.google.com/oauth-redirect}"
+if [[ -z "$EXISTING_REDIRECTS" || "$EXISTING_REDIRECTS" == "http://localhost,http://127.0.0.1" ]]; then
+  SUGGESTED_REDIRECTS="$DEFAULT_REDIRECTS"
+else
+  SUGGESTED_REDIRECTS="$EXISTING_REDIRECTS"
+fi
+ask OAUTH_ALLOWED_REDIRECT_URIS "Allowed Redirect URIs [${SUGGESTED_REDIRECTS}]:"
+OAUTH_ALLOWED_REDIRECT_URIS="${OAUTH_ALLOWED_REDIRECT_URIS:-$SUGGESTED_REDIRECTS}"
 write_env OAUTH_ALLOWED_REDIRECT_URIS "$OAUTH_ALLOWED_REDIRECT_URIS"
 
 # ── Stage 3: Actual Budget Sync Server ─────────────────────────────────────

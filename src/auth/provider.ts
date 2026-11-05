@@ -71,10 +71,14 @@ export function isAllowedRedirectUri(
         !isLoopbackCandidate &&
         parsedAllowed.protocol === parsed.protocol &&
         parsedAllowed.hostname === parsed.hostname &&
-        allowed.endsWith('/') &&
-        redirectUri.startsWith(allowed)
+        allowed.endsWith('/')
       ) {
-        return true;
+        const allowedBasePath = parsedAllowed.pathname.endsWith('/')
+          ? parsedAllowed.pathname
+          : `${parsedAllowed.pathname}/`;
+        if (parsed.pathname.startsWith(allowedBasePath)) {
+          return true;
+        }
       }
     } catch {
       // Ignore invalid configured allowed URI
@@ -175,12 +179,6 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
     this.tokenStore = new FileTokenStore(config.DATA_DIR);
     this.allowedRedirectUris = new Set<string>(config.OAUTH_ALLOWED_REDIRECT_URIS);
 
-    for (const client of this.tokenStore.getAllClients()) {
-      for (const uri of client.redirect_uris ?? []) {
-        this.allowedRedirectUris.add(uri);
-      }
-    }
-
     this.store = {
       getClient: (clientId: string) => {
         if (!clientId || clientId.trim() === '') {
@@ -201,6 +199,15 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
           client_id_issued_at?: number;
         },
       ) => {
+        if (
+          client.token_endpoint_auth_method !== undefined &&
+          client.token_endpoint_auth_method !== 'none'
+        ) {
+          throw new InvalidClientMetadataError(
+            'Only public client authentication (token_endpoint_auth_method: none) is supported',
+          );
+        }
+
         const redirectUris = client.redirect_uris ?? [];
         if (redirectUris.length === 0) {
           throw new InvalidClientMetadataError(
@@ -214,7 +221,6 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
               `Redirect URI not allowed by server allowlist policy: ${uri}`,
             );
           }
-          this.allowedRedirectUris.add(uri);
         }
 
         const clientId = client.client_id ?? randomUUID();
@@ -223,6 +229,9 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
           client_id: clientId,
           client_id_issued_at:
             client.client_id_issued_at ?? Math.floor(Date.now() / 1000),
+          client_secret: undefined,
+          client_secret_expires_at: undefined,
+          token_endpoint_auth_method: 'none',
           redirect_uris: redirectUris,
         };
 

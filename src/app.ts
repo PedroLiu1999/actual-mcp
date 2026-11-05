@@ -24,10 +24,9 @@ import { createMcpServer } from './mcp/server.js';
 export interface CreateAppOptions {
   config: AppConfig;
   budgetGateway: BudgetGateway;
-  oauthProvider?: EmbeddedOAuthProvider;
 }
 
-export function createApp({ config, budgetGateway, oauthProvider: customOAuthProvider }: CreateAppOptions): Express {
+export function createApp({ config, budgetGateway }: CreateAppOptions): Express {
   const app = express();
   app.set('trust proxy', 1);
 
@@ -42,7 +41,7 @@ export function createApp({ config, budgetGateway, oauthProvider: customOAuthPro
   const issuerUrl = new URL(config.PUBLIC_URL);
   const resourceServerUrl = new URL(`${config.PUBLIC_URL}/mcp`);
   const scopesSupported = ['mcp:tools'];
-  const oauthProvider = customOAuthProvider ?? new EmbeddedOAuthProvider(config);
+  const oauthProvider = new EmbeddedOAuthProvider(config);
   const logoUrl = config.LOGO_URL ?? `${config.PUBLIC_URL}/logo.png`;
 
   const oauthMetadata: OAuthMetadata = {
@@ -53,8 +52,8 @@ export function createApp({ config, budgetGateway, oauthProvider: customOAuthPro
     }),
     issuer: config.PUBLIC_URL,
     logo_uri: logoUrl,
-    token_endpoint_auth_methods_supported: ['none', 'client_secret_post'],
-    revocation_endpoint_auth_methods_supported: ['none', 'client_secret_post'],
+    token_endpoint_auth_methods_supported: ['none'],
+    revocation_endpoint_auth_methods_supported: ['none'],
   };
 
   const protectedResourceMetadata: OAuthProtectedResourceMetadata = {

@@ -214,6 +214,72 @@ export interface SpendingSummary {
   groups: SpendingSummaryGroup[];
 }
 
+export interface CreateCategoryInput {
+  name: string;
+  groupId: string;
+  isIncome?: boolean;
+  hidden?: boolean;
+}
+
+export interface CreateCategoryResult {
+  id: string;
+}
+
+export interface UpdateCategoryInput {
+  id: string;
+  name?: string;
+  groupId?: string;
+  isIncome?: boolean;
+  hidden?: boolean;
+}
+
+export interface UpdateCategoryResult {
+  id: string;
+  success: boolean;
+}
+
+export interface DeleteCategoryInput {
+  id: string;
+  transferCategoryId?: string;
+}
+
+export interface DeleteCategoryResult {
+  id: string;
+  success: boolean;
+}
+
+export interface CreateCategoryGroupInput {
+  name: string;
+  isIncome?: boolean;
+  hidden?: boolean;
+}
+
+export interface CreateCategoryGroupResult {
+  id: string;
+}
+
+export interface UpdateCategoryGroupInput {
+  id: string;
+  name?: string;
+  isIncome?: boolean;
+  hidden?: boolean;
+}
+
+export interface UpdateCategoryGroupResult {
+  id: string;
+  success: boolean;
+}
+
+export interface DeleteCategoryGroupInput {
+  id: string;
+  transferCategoryId?: string;
+}
+
+export interface DeleteCategoryGroupResult {
+  id: string;
+  success: boolean;
+}
+
 export interface BudgetGateway {
   getReadiness(): BudgetReadiness;
   listAccounts(options?: { forceSync?: boolean }): Promise<AccountSummary[]>;
@@ -231,6 +297,12 @@ export interface BudgetGateway {
   updateTransaction?(input: UpdateTransactionInput): Promise<UpdateTransactionResult>;
   deleteTransaction?(id: string): Promise<DeleteTransactionResult>;
   setBudgetAmount?(input: SetBudgetAmountInput): Promise<SetBudgetAmountResult>;
+  createCategory?(input: CreateCategoryInput): Promise<CreateCategoryResult>;
+  updateCategory?(input: UpdateCategoryInput): Promise<UpdateCategoryResult>;
+  deleteCategory?(input: DeleteCategoryInput): Promise<DeleteCategoryResult>;
+  createCategoryGroup?(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult>;
+  updateCategoryGroup?(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult>;
+  deleteCategoryGroup?(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult>;
   initialize?(): Promise<void>;
   sync?(): Promise<void>;
   shutdown?(): Promise<void>;

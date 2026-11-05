@@ -18,8 +18,16 @@ import type {
   BudgetReadiness,
   CategoryGroupSummary,
   CategorySummary,
+  CreateCategoryGroupInput,
+  CreateCategoryGroupResult,
+  CreateCategoryInput,
+  CreateCategoryResult,
   CreateTransactionsInput,
   CreateTransactionsResult,
+  DeleteCategoryGroupInput,
+  DeleteCategoryGroupResult,
+  DeleteCategoryInput,
+  DeleteCategoryResult,
   DeleteTransactionResult,
   GetSpendingSummaryInput,
   GetTransactionsFilter,
@@ -29,6 +37,10 @@ import type {
   SpendingSummary,
   SpendingSummaryGroup,
   TransactionRecord,
+  UpdateCategoryGroupInput,
+  UpdateCategoryGroupResult,
+  UpdateCategoryInput,
+  UpdateCategoryResult,
   UpdateTransactionInput,
   UpdateTransactionResult,
 } from './types.js';
@@ -156,6 +168,27 @@ export interface ActualApiAdapter {
   deleteTransaction?(id: string): Promise<unknown>;
   setBudgetAmount?(month: string, categoryId: string, value: number): Promise<void>;
   setBudgetCarryover?(month: string, categoryId: string, flag: boolean): Promise<void>;
+  createCategory?(category: {
+    name: string;
+    group_id: string;
+    is_income?: boolean;
+    hidden?: boolean;
+  }): Promise<string>;
+  updateCategory?(
+    id: string,
+    fields: Record<string, unknown>,
+  ): Promise<unknown>;
+  deleteCategory?(id: string, transferCategoryId?: string): Promise<unknown>;
+  createCategoryGroup?(group: {
+    name: string;
+    is_income?: boolean;
+    hidden?: boolean;
+  }): Promise<string>;
+  updateCategoryGroup?(
+    id: string,
+    fields: Record<string, unknown>,
+  ): Promise<unknown>;
+  deleteCategoryGroup?(id: string, transferCategoryId?: string): Promise<unknown>;
   q?: typeof actualApi.q;
   aqlQuery?(query: ReturnType<typeof actualApi.q>): Promise<unknown>;
 }
@@ -193,6 +226,12 @@ export interface ActualBudgetGateway extends BudgetGateway {
   updateTransaction(input: UpdateTransactionInput): Promise<UpdateTransactionResult>;
   deleteTransaction(id: string): Promise<DeleteTransactionResult>;
   setBudgetAmount(input: SetBudgetAmountInput): Promise<SetBudgetAmountResult>;
+  createCategory(input: CreateCategoryInput): Promise<CreateCategoryResult>;
+  updateCategory(input: UpdateCategoryInput): Promise<UpdateCategoryResult>;
+  deleteCategory(input: DeleteCategoryInput): Promise<DeleteCategoryResult>;
+  createCategoryGroup(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult>;
+  updateCategoryGroup(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult>;
+  deleteCategoryGroup(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult>;
   executeRead<T>(
     operation: (api: ActualApiAdapter) => Promise<T>,
     options?: { forceSync?: boolean },
@@ -219,6 +258,7 @@ export function createActualBudgetGateway(
   let shuttingDown = false;
   let shutdownPromise: Promise<void> | null = null;
   let queueTail: Promise<void> = Promise.resolve();
+  let cachedCategories: CategoryGroupSummary[] | null = null;
 
   function markSynced(): void {
     const currentMs = now();
@@ -243,6 +283,7 @@ export function createActualBudgetGateway(
       await api.sync();
       markSynced();
     }
+    cachedCategories = null;
   }
 
   async function runInitialize(): Promise<void> {
@@ -312,6 +353,7 @@ export function createActualBudgetGateway(
       await runSync();
       const result = await operation(api);
       await runSync();
+      cachedCategories = null;
       return result;
     });
   }
@@ -329,6 +371,7 @@ export function createActualBudgetGateway(
       } finally {
         ready = false;
         initialized = false;
+        cachedCategories = null;
         if (options.signalTarget?.off) {
           options.signalTarget.off('SIGTERM', handleSignal);
           options.signalTarget.off('SIGINT', handleSignal);
@@ -742,6 +785,10 @@ export function createActualBudgetGateway(
     async listCategories(
       readOptions?: { forceSync?: boolean },
     ): Promise<CategoryGroupSummary[]> {
+      if (!readOptions?.forceSync && cachedCategories !== null) {
+        return cachedCategories;
+      }
+
       return executeRead(async (apiAdapter) => {
         const rawGroups = (await apiAdapter.getCategoryGroups?.()) ?? [];
         const needsFallbackCategories = rawGroups.some((g) => !Array.isArray(g.categories));
@@ -750,7 +797,7 @@ export function createActualBudgetGateway(
             ? await apiAdapter.getCategories()
             : [];
 
-        return rawGroups.map((group) => {
+        const result = rawGroups.map((group) => {
           const rawCategories = Array.isArray(group.categories)
             ? group.categories
             : fallbackCategories.filter((c) => c.group_id === group.id);
@@ -770,6 +817,9 @@ export function createActualBudgetGateway(
             categories,
           };
         });
+
+        cachedCategories = result;
+        return result;
       }, readOptions);
     },
     async listPayees(readOptions?: { forceSync?: boolean }): Promise<PayeeSummary[]> {
@@ -988,6 +1038,84 @@ export function createActualBudgetGateway(
           previous,
           updated,
         };
+      });
+    },
+    async createCategory(input: CreateCategoryInput): Promise<CreateCategoryResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.createCategory) {
+          throw new Error('createCategory is not supported by the current API adapter');
+        }
+        const id = await apiAdapter.createCategory({
+          name: input.name,
+          group_id: input.groupId,
+          ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
+          ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+        });
+        cachedCategories = null;
+        return { id };
+      });
+    },
+    async updateCategory(input: UpdateCategoryInput): Promise<UpdateCategoryResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.updateCategory) {
+          throw new Error('updateCategory is not supported by the current API adapter');
+        }
+        const fields: Record<string, unknown> = {};
+        if (input.name !== undefined) fields.name = input.name;
+        if (input.groupId !== undefined) fields.group_id = input.groupId;
+        if (input.isIncome !== undefined) fields.is_income = input.isIncome;
+        if (input.hidden !== undefined) fields.hidden = input.hidden;
+        await apiAdapter.updateCategory(input.id, fields);
+        cachedCategories = null;
+        return { id: input.id, success: true };
+      });
+    },
+    async deleteCategory(input: DeleteCategoryInput): Promise<DeleteCategoryResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.deleteCategory) {
+          throw new Error('deleteCategory is not supported by the current API adapter');
+        }
+        await apiAdapter.deleteCategory(input.id, input.transferCategoryId);
+        cachedCategories = null;
+        return { id: input.id, success: true };
+      });
+    },
+    async createCategoryGroup(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.createCategoryGroup) {
+          throw new Error('createCategoryGroup is not supported by the current API adapter');
+        }
+        const id = await apiAdapter.createCategoryGroup({
+          name: input.name,
+          ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
+          ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+        });
+        cachedCategories = null;
+        return { id };
+      });
+    },
+    async updateCategoryGroup(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.updateCategoryGroup) {
+          throw new Error('updateCategoryGroup is not supported by the current API adapter');
+        }
+        const fields: Record<string, unknown> = {};
+        if (input.name !== undefined) fields.name = input.name;
+        if (input.isIncome !== undefined) fields.is_income = input.isIncome;
+        if (input.hidden !== undefined) fields.hidden = input.hidden;
+        await apiAdapter.updateCategoryGroup(input.id, fields);
+        cachedCategories = null;
+        return { id: input.id, success: true };
+      });
+    },
+    async deleteCategoryGroup(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult> {
+      return executeWrite(async (apiAdapter) => {
+        if (!apiAdapter.deleteCategoryGroup) {
+          throw new Error('deleteCategoryGroup is not supported by the current API adapter');
+        }
+        await apiAdapter.deleteCategoryGroup(input.id, input.transferCategoryId);
+        cachedCategories = null;
+        return { id: input.id, success: true };
       });
     },
   };

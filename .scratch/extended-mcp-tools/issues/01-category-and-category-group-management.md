@@ -4,13 +4,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `create_category` accepts `name`, `groupId`, and optional `isIncome` and `hidden` flags, returning the created category ID.
-- [ ] `update_category` allows updating `name`, `groupId`, `isIncome`, or `hidden` flags for an existing category.
-- [ ] `delete_category` supports deleting a category, accepts an optional `transferCategoryId` to reassign historical transactions, and is annotated with `destructiveHint: true`.
-- [ ] `create_category_group` accepts `name` and optional `isIncome` and `hidden` flags, returning the created category group ID.
-- [ ] `update_category_group` allows updating `name`, `isIncome`, or `hidden` flags for an existing category group.
-- [ ] `delete_category_group` supports deleting a category group with an optional `transferCategoryId` and carries `destructiveHint: true`.
-- [ ] Mutations trigger immediate Coalesced Sync upstream and invalidate the in-memory categories cache.
-- [ ] End-to-end HTTP integration tests pass exercising each tool via JSON-RPC `tools/call`.
+- [x] `create_category` accepts `name`, `groupId`, and optional `isIncome` and `hidden` flags, returning the created category ID.
+- [x] `update_category` allows updating `name`, `groupId`, `isIncome`, or `hidden` flags for an existing category.
+- [x] `delete_category` supports deleting a category, accepts an optional `transferCategoryId` to reassign historical transactions, and is annotated with `destructiveHint: true`.
+- [x] `create_category_group` accepts `name` and optional `isIncome` and `hidden` flags, returning the created category group ID.
+- [x] `update_category_group` allows updating `name`, `isIncome`, or `hidden` flags for an existing category group.
+- [x] `delete_category_group` supports deleting a category group with an optional `transferCategoryId` and carries `destructiveHint: true`.
+- [x] Mutations trigger immediate Coalesced Sync upstream and invalidate the in-memory categories cache.
+- [x] End-to-end HTTP integration tests pass exercising each tool via JSON-RPC `tools/call`.

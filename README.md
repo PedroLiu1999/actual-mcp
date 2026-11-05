@@ -35,7 +35,7 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
                                                                    |                        v                          |
                                                                    |  +---------------------------------------------+  |
                                                                    |  | Stateless Streamable HTTP Transport (/mcp)  |  |
-                                                                   |  | - 12 MCP Tools (8 Read, 4 Write)            |  |
+                                                                   |  | - 30 MCP Tools (8 Read, 22 Write)           |  |
                                                                    |  | - Decimal Amount <-> Minor Unit conversion  |  |
                                                                    |  +---------------------------------------------+  |
                                                                    |                        |                          |
@@ -75,9 +75,9 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 
 ---
 
-## MCP Tools Reference (12 Tools)
+## MCP Tools Reference (all 26 MCP tools & extended lifecycle capabilities)
 
-All tools return structured JSON serialized in MCP text content blocks and include MCP safety annotations (`readOnlyHint`, `destructiveHint`).
+`actual-mcp` v0.2.0 documents and provides all 26 MCP tools across Categories, Payees, Accounts, Bank Sync, and Budget Adjustments (30 total registered tools including category group operations). All tools return structured JSON serialized in MCP text content blocks and include MCP safety annotations (`readOnlyHint`, `destructiveHint`).
 
 ### Read Tools (`readOnlyHint: true`, `destructiveHint: false`)
 
@@ -92,7 +92,9 @@ All tools return structured JSON serialized in MCP text content blocks and inclu
 | `list_budget_months` | List available `YYYY-MM` **Budget Months** in the **Target Budget**. | `forceSync?` (`boolean`) |
 | `get_budget_month` | Inspect a `YYYY-MM` **Budget Month** envelope summary (`toBudget`, `totalIncome`, `totalBudgeted`, `totalSpent`, `totalBalance`, and per-category `budgeted`, `spent`, `balance`, `carryover` in **Decimal Amounts**). | `month` (`YYYY-MM`, required), `forceSync?` (`boolean`) |
 
-### Write Tools (`readOnlyHint: false`)
+### Write & Lifecycle Tools (`readOnlyHint: false`)
+
+#### Transactions & Budget Amounts (Core v0.1.0)
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
@@ -100,6 +102,49 @@ All tools return structured JSON serialized in MCP text content blocks and inclu
 | `update_transaction` | `false` | Update an existing transaction by ID and return `{ previous, updated }` in **Decimal Amounts** so edits can be verified or immediately reverted. | `id` (`string`, required), `date?` (`YYYY-MM-DD`), `amount?` (`number`), `payeeId?` (`string \| null`), `categoryId?` (`string \| null`), `notes?` (`string \| null`), `cleared?` (`boolean`) |
 | `delete_transaction` | `true` | Delete an existing transaction by ID and return `{ deleted }` containing the full pre-deletion record in **Decimal Amounts** so it can be recreated if deleted by mistake. | `id` (`string`, required) |
 | `set_budget_amount` | `false` | Update a category's budgeted **Decimal Amount** and/or overspending `carryover` flag in a `YYYY-MM` **Budget Month** and return `{ previous, updated }` category states. | `month` (`YYYY-MM`, required), `categoryId` (`string`, required), `budgeted?` (`number`), `carryover?` (`boolean`) |
+
+#### Category & Category Group Management (v0.2.0)
+
+| Tool | Destructive | Description | Parameters |
+| :--- | :---: | :--- | :--- |
+| `create_category` | `false` | Create a new envelope category under an existing category group. Returns `{ id }`. | `name` (`string`, min 1, required), `groupId` (`string`, min 1, required), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
+| `update_category` | `false` | Update an existing envelope category (rename, move to a different parent group, toggle income/hidden flags). | `id` (`string`, min 1, required), `name?` (`string`), `groupId?` (`string`), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
+| `delete_category` | `true` | Delete an existing envelope category. If the category has existing transactions, `transferCategoryId` must be provided to reassign them without orphaned records. | `id` (`string`, min 1, required), `transferCategoryId?` (`string`, min 1) |
+| `create_category_group` | `false` | Create a new category group to organize related expense or income envelopes. Returns `{ id }`. | `name` (`string`, min 1, required), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
+| `update_category_group` | `false` | Update an existing category group (rename or toggle income/hidden flags). | `id` (`string`, min 1, required), `name?` (`string`), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
+| `delete_category_group` | `true` | Delete an existing category group. If any member categories have transactions, `transferCategoryId` must be provided to safely reassign them. | `id` (`string`, min 1, required), `transferCategoryId?` (`string`, min 1) |
+
+#### Payee Management & Merging (v0.2.0)
+
+| Tool | Destructive | Description | Parameters |
+| :--- | :---: | :--- | :--- |
+| `create_payee` | `false` | Create a new payee record with a name string and return its generated ID `{ id }`. | `name` (`string`, min 1, required) |
+| `update_payee` | `false` | Rename an existing payee record. | `id` (`string`, min 1, required), `name` (`string`, min 1, required) |
+| `delete_payee` | `true` | Delete an existing payee record. | `id` (`string`, min 1, required) |
+| `merge_payees` | `true` | Merge one or more duplicate source payees into a canonical target payee, consolidating all transactions and rules under the target payee and removing source records. | `targetPayeeId` (`string`, min 1, required), `sourcePayeeIds` (`string[]`, min 1 items, required) |
+
+#### Account Lifecycle Management (v0.2.0)
+
+| Tool | Destructive | Description | Parameters |
+| :--- | :---: | :--- | :--- |
+| `create_account` | `false` | Create a new on-budget or off-budget account with a specified type and optional initial balance in **Decimal Amount**. Returns `{ id }`. | `name` (`string`, min 1, required), `type` (`'checking' \| 'savings' \| 'credit' \| 'investment' \| 'mortgage' \| 'debt' \| 'other'`, required), `offbudget?` (`boolean`), `initialBalance?` (`number`, finite Decimal Amount) |
+| `update_account` | `false` | Update an existing account name, toggle its off-budget status, or toggle its closed flag. | `id` (`string`, min 1, required), `name?` (`string`), `offbudget?` (`boolean`), `closed?` (`boolean`) |
+| `close_account` | `true` | Close an account in the Target Budget, optionally transferring remaining balance to another account and category. | `id` (`string`, min 1, required), `transferAccountId?` (`string`), `transferCategoryId?` (`string`) |
+| `reopen_account` | `false` | Reopen a previously closed account. | `id` (`string`, min 1, required) |
+
+#### Bank Synchronization (v0.2.0)
+
+| Tool | Destructive | Description | Parameters |
+| :--- | :---: | :--- | :--- |
+| `run_bank_sync` | `false` | Trigger bank synchronization for a specific linked account or all linked accounts when `accountId` is omitted. Returns structured reconciliation summary `{ updatedAccountIds, newTransactionsCount, matchedTransactionsCount, errors }`. | `accountId?` (`string`, min 1) |
+
+#### Budget Flow Adjustments (v0.2.0)
+
+| Tool | Destructive | Description | Parameters |
+| :--- | :---: | :--- | :--- |
+| `set_budget_carryover` | `false` | Set the carryover flag for a category envelope in a specified budget month (`YYYY-MM`). When true, overspent category balance rolls over into the next month. | `month` (`YYYY-MM`, required), `categoryId` (`string`, min 1, required), `carryover` (`boolean`, required) |
+| `hold_budget_for_next_month` | `false` | Hold a specified **Decimal Amount** from the current month available budget to buffer next month. | `month` (`YYYY-MM`, required), `amount` (`number`, finite Decimal Amount, required) |
+| `reset_budget_hold` | `false` | Reset the budget hold for a given month, releasing any held reserve funds back to the current month available budget. | `month` (`YYYY-MM`, required) |
 
 ---
 

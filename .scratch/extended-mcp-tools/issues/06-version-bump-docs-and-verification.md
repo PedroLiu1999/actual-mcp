@@ -4,10 +4,10 @@
 
 **Blocked by:** 01: Category and Category Group Management Tools, 02: Payee Management and Merge Tools, 03: Account Lifecycle Management Tools, 04: Bank Synchronization Tool, 05: Budget Flow Adjustment Tools
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `package.json` version bumped to `0.2.0`.
-- [ ] `src/mcp/server.ts` server info version set to `0.2.0`.
-- [ ] `README.md` updated to document the 14 new tools across Categories, Payees, Accounts, Bank Sync, and Budget Adjustments.
-- [ ] Full regression test suite (`npm test`) passes with 100% green tests.
-- [ ] TypeScript typecheck (`npm run typecheck`) and build (`npm run build`) complete without errors.
+- [x] `package.json` version bumped to `0.2.0`.
+- [x] `src/mcp/server.ts` server info version set to `0.2.0`.
+- [x] `README.md` updated to document the 14 new tools across Categories, Payees, Accounts, Bank Sync, and Budget Adjustments.
+- [x] Full regression test suite (`npm test`) passes with 100% green tests.
+- [x] TypeScript typecheck (`npm run typecheck`) and build (`npm run build`) complete without errors.

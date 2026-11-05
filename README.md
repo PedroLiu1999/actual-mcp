@@ -26,70 +26,16 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 
 ![actual-mcp Architecture](docs/assets/architecture.svg)
 
-<details>
-<summary>ASCII Diagram Fallback</summary>
-
-```text
-+------------------------+        HTTPS (Cloudflare Tunnel)        +---------------------------------------------------+
-|  AI Assistant / Client |  ------------------------------------>  |               actual-mcp (Docker)                 |
-| (Claude, Cursor, etc.) |     POST /mcp (Bearer Access Token)     |                                                   |
-|                        |     GET  /.well-known/oauth-*           |  +---------------------------------------------+  |
-|                        |     GET/POST /authorize, POST /token    |  | Embedded OAuth Server (OAuth 2.1 + PKCE)    |  |
-+------------------------+                                         |  | - Public Client (no client secrets needed)  |  |
-                                                                   |  | - Dynamic client_id acceptance              |  |
-                                                                   |  | - Passphrase-protected HTML consent screen  |  |
-                                                                   |  | - Persistent Token Store (oauth-tokens.json)|  |
-                                                                   |  +---------------------------------------------+  |
-                                                                   |                        |                          |
-                                                                   |                        v                          |
-                                                                   |  +---------------------------------------------+  |
-                                                                   |  | Stateless Streamable HTTP Transport (/mcp)  |  |
-                                                                   |  | - 39 MCP Tools (11 Read, 28 Write)          |  |
-                                                                   |  | - Decimal Amount <-> Minor Unit conversion  |  |
-                                                                   |  +---------------------------------------------+  |
-                                                                   |                        |                          |
-                                                                   |                        v                          |
-                                                                   |  +---------------------------------------------+  |
-                                                                   |  | ActualBudgetGateway (FIFO Mutex)            |  |
-                                                                   |  | - Coalesced Sync (TTL on reads, pre/post    |  |
-                                                                   |  |   sync on writes, graceful SIGTERM drain)   |  |
-                                                                   |  | - Local SQLite Budget Cache (/data)         |  |
-                                                                   |  +---------------------------------------------+  |
-                                                                   +------------------------|--------------------------+
-                                                                                            |
-                                                                                            | HTTP (host.docker.internal:5006)
-                                                                                            v
-                                                                   +---------------------------------------------------+
-                                                                   |       Existing Actual Budget Sync Server          |
-                                                                   |            (actualbudget/actual-server)           |
-                                                                   +---------------------------------------------------+
-```
-
-</details>
-
-### Key Design Highlights
-
-1. **Embedded Single-Tenant OAuth 2.1 Server ([ADR-0006](docs/adr/0006-public-client-pkce-oauth.md))**:
-   - Exposes RFC 9728 Protected Resource Metadata (`/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp`) and RFC 8414 Authorization Server Metadata (`/.well-known/oauth-authorization-server`).
-   - Zero client credentials required: implements OAuth 2.1 Public Client (`token_endpoint_auth_methods_supported: ['none']`) with PKCE (`S256`).
-   - Dynamically accepts any incoming `client_id` without requiring an RFC 7591 registration endpoint.
-   - Enforces an explicit redirect URI allowlist in `.env` (`OAUTH_ALLOWED_REDIRECT_URIS`), supporting loopback port relaxation for `localhost` and `127.0.0.1` per RFC 8252 §7.3 while enforcing exact matching on remote HTTPS URIs.
-   - Renders a self-contained, rate-limited HTML consent screen at `GET /authorize` gated by `OAUTH_ADMIN_PASSWORD`.
-   - Implements **Persistent Linking** via a file-backed **Token Store** (`/data/oauth-tokens.json`): `grant_type=refresh_token` returns a fresh access token while preserving the exact same refresh token and extending its sliding 365-day expiration so your AI link survives token refreshes and container restarts.
-2. **Single-Budget FIFO Mutex & Coalesced Sync ([ADR-0002](docs/adr/0002-single-budget-mutex-and-cache.md))**:
-   - `@actual-app/api` embeds `loot-core` and a module-level `better-sqlite3` singleton. `actual-mcp` binds to a single **Target Budget** (`ACTUAL_SYNC_ID`), caches its SQLite database in `/data/budget-cache`, and serializes every API operation through a process-wide non-reentrant FIFO mutex.
-   - **Coalesced Sync**: Read operations skip `api.sync()` if the **Budget Cache** was synced within `SYNC_TTL_SECONDS` (default `30` seconds, overrideable per call with `forceSync: true`). Write operations always `sync()` before mutating and `sync()` immediately after mutating so changes reach the **Sync Server** before the tool returns.
-   - **Graceful Shutdown**: Running under `tini` (PID 1), `SIGTERM` and `SIGINT` drain any in-flight mutex operation, run a final `sync()`, and cleanly close the SQLite database via `shutdown()`.
-3. **Decimal Amounts at the MCP Boundary**:
-   - Internally, `@actual-app/api` represents money as integer **Minor Unit Amounts** (`-1234` for `-$12.34`). Every MCP tool in `actual-mcp` accepts and returns standard major-unit **Decimal Amounts** (`-12.34` for a `$12.34` **Outflow** / expense, `100.00` for a `$100.00` **Inflow** / income) to prevent LLM unit-scale errors.
-
 ---
 
 ## MCP Tools Reference (all 39 MCP tools & extended lifecycle capabilities)
 
-`actual-mcp` v0.3.0 documents and provides all 39 MCP tools (11 read, 28 write across Categories, Category Groups, Payees, Accounts, Bank Sync, Budget Adjustments, Recurring Schedules, and Automation Rules). All tools return structured JSON serialized in MCP text content blocks and include MCP safety annotations (`readOnlyHint`, `destructiveHint`).
+`actual-mcp` v0.4.0 documents and provides all 39 MCP tools (11 read, 28 write across Categories, Category Groups, Payees, Accounts, Bank Sync, Budget Adjustments, Recurring Schedules, and Automation Rules). All tools return structured JSON serialized in MCP text content blocks and include MCP safety annotations (`readOnlyHint`, `destructiveHint`).
 
 ### Read Tools (`readOnlyHint: true`, `destructiveHint: false`)
+
+<details>
+<summary><strong>View Read Tools (11 tools)</strong></summary>
 
 | Tool | Description | Parameters |
 | :--- | :--- | :--- |
@@ -105,9 +51,12 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 | `get_schedule_upcoming_dates` | Calculate upcoming occurrence dates for a schedule ID or date recurrence config over a given date range or count. | `scheduleId?` (`string`), `date?` (`string \| object`), `start?` (`YYYY-MM-DD`), `end?` (`YYYY-MM-DD`), `count?` (`number`, 1..100, default 10), `forceSync?` (`boolean`) |
 | `list_rules` | List all automation/categorization rules in the **Target Budget** with conditions, actions, stage, and operator, with optional payee filtering. Amounts in conditions and actions are converted to **Decimal Amounts**. | `payeeId?` (`string`), `forceSync?` (`boolean`) |
 
+</details>
+
 ### Write & Lifecycle Tools (`readOnlyHint: false`)
 
-#### Transactions & Budget Amounts (Core v0.1.0)
+<details>
+<summary><strong>Transactions & Budget Amounts</strong> (4 tools)</summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
@@ -116,7 +65,10 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 | `delete_transaction` | `true` | Delete an existing transaction by ID and return `{ deleted }` containing the full pre-deletion record in **Decimal Amounts** so it can be recreated if deleted by mistake. | `id` (`string`, required) |
 | `set_budget_amount` | `false` | Update a category's budgeted **Decimal Amount** and/or overspending `carryover` flag in a `YYYY-MM` **Budget Month** and return `{ previous, updated }` category states. | `month` (`YYYY-MM`, required), `categoryId` (`string`, required), `budgeted?` (`number`), `carryover?` (`boolean`) |
 
-#### Category & Category Group Management (v0.2.0)
+</details>
+
+<details>
+<summary><strong>Category & Category Group Management</strong> (6 tools)</summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
@@ -127,7 +79,10 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 | `update_category_group` | `false` | Update an existing category group (rename or toggle income/hidden flags). | `id` (`string`, min 1, required), `name?` (`string`), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
 | `delete_category_group` | `true` | Delete an existing category group. If any member categories have transactions, `transferCategoryId` must be provided to safely reassign them. | `id` (`string`, min 1, required), `transferCategoryId?` (`string`, min 1) |
 
-#### Payee Management & Merging (v0.2.0)
+</details>
+
+<details>
+<summary><strong>Payee Management & Merging</strong> (4 tools)</summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
@@ -136,7 +91,10 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 | `delete_payee` | `true` | Delete an existing payee record. | `id` (`string`, min 1, required) |
 | `merge_payees` | `true` | Merge one or more duplicate source payees into a canonical target payee, consolidating all transactions and rules under the target payee and removing source records. | `targetPayeeId` (`string`, min 1, required), `sourcePayeeIds` (`string[]`, min 1 items, required) |
 
-#### Account Lifecycle Management (v0.2.0)
+</details>
+
+<details>
+<summary><strong>Account Lifecycle Management</strong> (4 tools)</summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
@@ -145,13 +103,19 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 | `close_account` | `true` | Close an account in the Target Budget, optionally transferring remaining balance to another account and category. | `id` (`string`, min 1, required), `transferAccountId?` (`string`), `transferCategoryId?` (`string`) |
 | `reopen_account` | `false` | Reopen a previously closed account. | `id` (`string`, min 1, required) |
 
-#### Bank Synchronization (v0.2.0)
+</details>
+
+<details>
+<summary><strong>Bank Synchronization</strong> (1 tool)</summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
 | `run_bank_sync` | `false` | Trigger bank synchronization for a specific linked account or all linked accounts when `accountId` is omitted. Returns structured reconciliation summary `{ updatedAccountIds, newTransactionsCount, matchedTransactionsCount, errors }`. | `accountId?` (`string`, min 1) |
 
-#### Budget Flow Adjustments (v0.2.0)
+</details>
+
+<details>
+<summary><strong>Budget Flow Adjustments</strong> (3 tools)</summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
@@ -159,7 +123,10 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 | `hold_budget_for_next_month` | `false` | Hold a specified **Decimal Amount** from the current month available budget for next month. | `month` (`YYYY-MM`, required), `amount` (`number`, finite Decimal Amount, required) |
 | `reset_budget_hold` | `false` | Reset the budget hold for a given month, releasing held budget hold funds back to the current month available budget. | `month` (`YYYY-MM`, required) |
 
-#### Recurring Schedules Suite (v0.3.0)
+</details>
+
+<details>
+<summary><strong>Recurring Schedules Suite</strong> (3 tools)</summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
@@ -167,13 +134,18 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 | `update_schedule` | `false` | Update fields on an existing recurring schedule (name, amount as Decimal Amount, amountOp, payee, account, date, posts_transaction, resetNextDate). | `id` (`string`, required), `name?` (`string`), `account?` (`string`), `payee?` (`string \| null`), `amount?` (`number \| { num1, num2 }`), `amountOp?` (`'is' \| 'isapprox' \| 'isbetween'`), `date?` (`string \| object`), `posts_transaction?` (`boolean`), `resetNextDate?` (`boolean`) |
 | `delete_schedule` | `true` | Permanently delete a recurring schedule from the Target Budget. | `id` (`string`, required) |
 
-#### Automation Rules Suite (v0.3.0)
+</details>
+
+<details>
+<summary><strong>Automation Rules Suite</strong> (3 tools)</summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
 | `create_rule` | `false` | Create a new automation rule for categorization, payee renaming, or field setting. Converts any monetary condition/action values from **Decimal Amounts** to Minor Units. | `stage?` (`'pre' \| 'post' \| 'default'`), `conditionsOp?` (`'and' \| 'or'`), `conditions` (`Array<{ field, op, value, options? }>`, min 1, required), `actions` (`Array<{ field?, op, value?, options? }>`, min 1, required) |
 | `update_rule` | `false` | Update conditions, actions, stage, or conditionsOp for an existing automation rule by ID. | `id` (`string`, required), `stage?` (`'pre' \| 'post' \| 'default'`), `conditionsOp?` (`'and' \| 'or'`), `conditions` (`Array<{ field, op, value, options? }>`, min 1, required), `actions` (`Array<{ field?, op, value?, options? }>`, min 1, required) |
 | `delete_rule` | `true` | Permanently delete an automation rule from the Target Budget. | `id` (`string`, required) |
+
+</details>
 
 ---
 

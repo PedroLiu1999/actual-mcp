@@ -91,7 +91,7 @@ export function renderConsentHtml(options: {
 }): string {
   const scopesText = options.scopes && options.scopes.length > 0 ? options.scopes.join(' ') : 'mcp:tools';
   const errorBanner = options.errorMessage
-    ? `<div role="alert" style="color: #b91c1c; background: #fee2e2; padding: 0.75rem; border-radius: 0.375rem; margin-bottom: 1rem;">${escapeHtml(options.errorMessage)}</div>`
+    ? `<div role="alert" style="color: #b91c1c; background: #fee2e2; padding: 0.75rem; border-radius: 0.5rem; margin-bottom: 1.25rem; font-size: 0.875rem;">${escapeHtml(options.errorMessage)}</div>`
     : '';
 
   return `<!DOCTYPE html>
@@ -99,27 +99,36 @@ export function renderConsentHtml(options: {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
   <title>Authorize Actual Budget MCP</title>
 </head>
-<body style="font-family: system-ui, sans-serif; max-width: 28rem; margin: 3rem auto; padding: 1.5rem;">
-  <h1>Authorize Actual Budget MCP</h1>
-  <p>Client <strong>${escapeHtml(options.clientId)}</strong> is requesting access to your Actual Budget (scope: <code>${escapeHtml(scopesText)}</code>).</p>
-  ${errorBanner}
-  <form method="POST" action="/authorize">
-    <input type="hidden" name="response_type" value="code" />
-    <input type="hidden" name="client_id" value="${escapeHtml(options.clientId)}" />
-    <input type="hidden" name="redirect_uri" value="${escapeHtml(options.redirectUri)}" />
-    <input type="hidden" name="code_challenge" value="${escapeHtml(options.codeChallenge)}" />
-    <input type="hidden" name="code_challenge_method" value="S256" />
-    ${options.state !== undefined ? `<input type="hidden" name="state" value="${escapeHtml(options.state)}" />` : ''}
-    ${options.scopes && options.scopes.length > 0 ? `<input type="hidden" name="scope" value="${escapeHtml(options.scopes.join(' '))}" />` : ''}
-    ${options.resource !== undefined ? `<input type="hidden" name="resource" value="${escapeHtml(options.resource)}" />` : ''}
-    <div style="margin-bottom: 1rem;">
-      <label for="password" style="display: block; margin-bottom: 0.5rem;">Admin Passphrase</label>
-      <input id="password" type="password" name="password" required autofocus style="width: 100%; padding: 0.5rem;" />
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F8FAFC; color: #0F172A; min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; padding: 1.5rem; box-sizing: border-box;">
+  <div style="background: #FFFFFF; max-width: 28rem; width: 100%; padding: 2.25rem; border-radius: 1rem; box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04); border: 1px solid #E2E8F0;">
+    <div style="text-align: center; margin-bottom: 1.75rem;">
+      <img src="/logo.png" alt="actual-mcp" width="68" height="68" style="border-radius: 16px; box-shadow: 0 4px 12px rgba(107, 70, 193, 0.25);" />
+      <h1 style="font-size: 1.35rem; font-weight: 700; margin: 1rem 0 0.25rem 0; color: #0F172A;">Authorize Actual Budget MCP</h1>
+      <p style="font-size: 0.8125rem; color: #64748B; margin: 0; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Model Context Protocol</p>
     </div>
-    <button type="submit" style="padding: 0.5rem 1rem;">Approve Access</button>
-  </form>
+    <p style="font-size: 0.9375rem; line-height: 1.5; color: #334155; margin-bottom: 1.25rem;">
+      Client <strong style="color: #0F172A;">${escapeHtml(options.clientId)}</strong> is requesting access to your Actual Budget (scope: <code style="background: #F1F5F9; color: #6B46C1; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-size: 0.85em;">${escapeHtml(scopesText)}</code>).
+    </p>
+    ${errorBanner}
+    <form method="POST" action="/authorize">
+      <input type="hidden" name="response_type" value="code" />
+      <input type="hidden" name="client_id" value="${escapeHtml(options.clientId)}" />
+      <input type="hidden" name="redirect_uri" value="${escapeHtml(options.redirectUri)}" />
+      <input type="hidden" name="code_challenge" value="${escapeHtml(options.codeChallenge)}" />
+      <input type="hidden" name="code_challenge_method" value="S256" />
+      ${options.state !== undefined ? `<input type="hidden" name="state" value="${escapeHtml(options.state)}" />` : ''}
+      ${options.scopes && options.scopes.length > 0 ? `<input type="hidden" name="scope" value="${escapeHtml(options.scopes.join(' '))}" />` : ''}
+      ${options.resource !== undefined ? `<input type="hidden" name="resource" value="${escapeHtml(options.resource)}" />` : ''}
+      <div style="margin-bottom: 1.25rem;">
+        <label for="password" style="display: block; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; color: #1E293B;">Admin Passphrase</label>
+        <input id="password" type="password" name="password" required autofocus style="width: 100%; padding: 0.625rem 0.75rem; border: 1px solid #CBD5E1; border-radius: 0.5rem; font-size: 1rem; box-sizing: border-box; outline: none;" />
+      </div>
+      <button type="submit" style="width: 100%; background: #6B46C1; color: #FFFFFF; border: none; padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.9375rem; font-weight: 600; cursor: pointer; box-shadow: 0 2px 4px rgba(107, 70, 193, 0.25);">Approve Access</button>
+    </form>
+  </div>
 </body>
 </html>`;
 }

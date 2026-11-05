@@ -32,6 +32,7 @@ ENV NODE_ENV=production \
 COPY --from=builder --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/dist ./dist
+COPY --chown=node:node docs/assets/logo/dist ./docs/assets/logo/dist
 
 VOLUME ["/data"]
 EXPOSE 3000

@@ -9,6 +9,7 @@ data
 .gitignore
 .scratch
 docs
+!docs/assets/logo/dist
 tests
 *.log
 *.md

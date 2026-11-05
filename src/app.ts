@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { metadataHandler } from '@modelcontextprotocol/sdk/server/auth/handlers/metadata.js';
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import {
@@ -69,6 +71,7 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
   const resourceServerUrl = new URL(`${config.PUBLIC_URL}/mcp`);
   const scopesSupported = ['mcp:tools'];
   const oauthProvider = new EmbeddedOAuthProvider(config);
+  const logoUrl = `${config.PUBLIC_URL}/logo.png`;
 
   const oauthMetadata: OAuthMetadata = {
     ...createOAuthMetadata({
@@ -77,6 +80,7 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
       scopesSupported,
     }),
     issuer: config.PUBLIC_URL,
+    logo_uri: logoUrl,
     token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
     revocation_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
   };
@@ -87,7 +91,29 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
     scopes_supported: scopesSupported,
     bearer_methods_supported: ['header'],
     resource_name: 'Actual Budget MCP Server',
+    logo_uri: logoUrl,
   };
+
+  const brandAssetsDir = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../docs/assets/logo/dist',
+  );
+
+  app.get('/favicon.ico', (_req, res) => {
+    res.type('image/x-icon').sendFile(path.join(brandAssetsDir, 'favicon.ico'));
+  });
+
+  app.get('/logo.png', (_req, res) => {
+    res.type('image/png').sendFile(path.join(brandAssetsDir, 'logo.png'));
+  });
+
+  app.get('/apple-touch-icon.png', (_req, res) => {
+    res.type('image/png').sendFile(path.join(brandAssetsDir, 'apple-touch-icon.png'));
+  });
+
+  app.get('/logo.svg', (_req, res) => {
+    res.type('image/svg+xml; charset=utf-8').sendFile(path.join(brandAssetsDir, 'logo.svg'));
+  });
 
   app.use(
     '/.well-known/oauth-protected-resource/mcp',
@@ -152,7 +178,7 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
   });
 
   app.post('/mcp', bearerAuth, async (req, res) => {
-    const server = createMcpServer(budgetGateway);
+    const server = createMcpServer(budgetGateway, config.PUBLIC_URL);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,

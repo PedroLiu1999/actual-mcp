@@ -88,6 +88,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     expect(pathRes.body).toMatchObject({
       resource: 'https://mcp.example.com/mcp',
       authorization_servers: ['https://mcp.example.com'],
+      logo_uri: 'https://mcp.example.com/logo.png',
     });
 
     const rootRes = await request(app)
@@ -108,6 +109,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
       issuer: 'https://mcp.example.com',
+      logo_uri: 'https://mcp.example.com/logo.png',
       authorization_endpoint: 'https://mcp.example.com/authorize',
       token_endpoint: 'https://mcp.example.com/token',
       revocation_endpoint: 'https://mcp.example.com/revoke',
@@ -168,6 +170,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       expect(res.status, `Expected 200 for allowed redirect_uri ${redirectUri}`).toBe(200);
       expect(res.headers['content-type']).toMatch(/text\/html/);
       expect(res.text).toContain('gemini-client');
+      expect(res.text).toContain('/logo.png');
       expect(res.text).toMatch(/type="password"/);
     }
 

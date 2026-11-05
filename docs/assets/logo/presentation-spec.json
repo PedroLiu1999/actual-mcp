@@ -1,0 +1,37 @@
+{
+  "brand": "actual-mcp",
+  "tagline": "The Autonomous Financial Bridge for Actual Budget",
+  "brief": "A self-contained Model Context Protocol (MCP) server connecting Actual Budget to Google Gemini over Streamable HTTP and OAuth 2.1.",
+  "adjectives": [
+    "autonomous",
+    "architectural",
+    "precise",
+    "trustworthy",
+    "open-source"
+  ],
+  "criteria": "Preserves Actual Budget brand equity while seamlessly integrating Gemini autonomous agent intelligence.",
+  "industry": "software",
+  "mockups": ["terminal", "readme", "app-icon", "website", "social", "sticker"],
+  "brand_color": "#6B46C1",
+  "greyscale": false,
+  "final": true,
+  "round": 1,
+  "designer": "Antigravity",
+  "concepts": [
+    {
+      "name": "The Agent Spark",
+      "symbol": "dist/actual-mcp-symbol-mono-6b46c1.svg",
+      "lockup": "dist/actual-mcp-horizontal.svg",
+      "stacked": "dist/actual-mcp-stacked.svg",
+      "avatar": "dist/actual-mcp-symbol-app-icon.svg",
+      "idea": "The iconic Actual Budget drafting 'A' embedding an autonomous agent sparkle nestled inside the apex.",
+      "rationale": [
+        "Retains 100% of Actual Budget's high-recognition drafting silhouette and purple equity",
+        "The Google Gemini 4-point sparkle signals active agent intelligence",
+        "Calculated optical clearance ensures the spark never collides with or overlaps the A-frame",
+        "Tested down to 16 px favicon scale with crisp negative-space separation"
+      ]
+    }
+  ],
+  "recommendation": "The Agent Spark bridges Actual Budget's personal finance heritage with Google Gemini's autonomous AI capabilities into a unified, enduring brand mark."
+}

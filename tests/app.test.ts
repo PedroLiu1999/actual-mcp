@@ -138,6 +138,26 @@ describe('HTTP application seam — healthz & host validation', () => {
     const badHost = await request(app).get('/healthz').set('Host', 'evil.attacker.com');
     expect(badHost.status).toBe(403);
   });
+
+  it('serves brand static assets (/favicon.ico, /logo.png, /apple-touch-icon.png, /logo.svg) for web discovery', async () => {
+    const app = createApp({ config: testConfig, budgetGateway: createStubGateway() });
+
+    const faviconRes = await request(app).get('/favicon.ico').set('Host', 'mcp.example.com');
+    expect(faviconRes.status).toBe(200);
+    expect(faviconRes.headers['content-type']).toMatch(/image\/(x-icon|vnd\.microsoft\.icon)/);
+
+    const logoPngRes = await request(app).get('/logo.png').set('Host', 'mcp.example.com');
+    expect(logoPngRes.status).toBe(200);
+    expect(logoPngRes.headers['content-type']).toBe('image/png');
+
+    const appleIconRes = await request(app).get('/apple-touch-icon.png').set('Host', 'mcp.example.com');
+    expect(appleIconRes.status).toBe(200);
+    expect(appleIconRes.headers['content-type']).toBe('image/png');
+
+    const logoSvgRes = await request(app).get('/logo.svg').set('Host', 'mcp.example.com');
+    expect(logoSvgRes.status).toBe(200);
+    expect(logoSvgRes.headers['content-type']).toBe('image/svg+xml; charset=utf-8');
+  });
 });
 
 describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accounts', () => {
@@ -178,6 +198,13 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     expect(res.body.jsonrpc).toBe('2.0');
     expect(res.body.id).toBe(1);
     expect(res.body.result.serverInfo.name).toBe('actual-mcp');
+    expect(res.body.result.serverInfo.icons).toEqual([
+      {
+        src: 'https://mcp.example.com/logo.png',
+        mimeType: 'image/png',
+        sizes: ['512x512', '128x128'],
+      },
+    ]);
     expect(res.body.result.instructions).toEqual(expect.any(String));
   });
 

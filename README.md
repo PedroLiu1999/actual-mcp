@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo/dist/actual-mcp-horizontal.svg" alt="actual-mcp logo" width="460">
+</p>
+
 # actual-mcp
 
 A self-contained Model Context Protocol (MCP) server that connects a self-hosted [Actual Budget](https://actualbudget.org/) instance to **Google Gemini** over **Streamable HTTP** (`POST /mcp`) and an **Embedded OAuth Server** (OAuth 2.1 Authorization Code + PKCE).
@@ -287,3 +291,13 @@ npm run typecheck
 # Compile TypeScript to dist/
 npm run build
 ```
+
+---
+
+## Brand & Logo Assets
+
+The official `actual-mcp` brand identity ("The Agent Spark") is available in [`docs/assets/logo/`](docs/assets/logo/):
+- **Brand Guidelines**: [`docs/assets/logo/BRAND-GUIDELINES.md`](docs/assets/logo/BRAND-GUIDELINES.md)
+- **Vector & Raster Distribution**: [`docs/assets/logo/dist/`](docs/assets/logo/dist/) (SVG masters, PNG ladders, PWA icons, favicon.ico)
+- **Interactive Presentation Board**: [`docs/assets/logo/presentation.html`](docs/assets/logo/presentation.html)
+

@@ -22,11 +22,24 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
   ) as T;
 }
 
-export function createMcpServer(budgetGateway: BudgetGateway): McpServer {
+export function createMcpServer(budgetGateway: BudgetGateway, publicUrl?: string): McpServer {
+  const logoUrl = publicUrl ? `${publicUrl}/logo.png` : undefined;
+
   const server = new McpServer(
     {
       name: 'actual-mcp',
       version: '0.1.0',
+      ...(logoUrl
+        ? {
+            icons: [
+              {
+                src: logoUrl,
+                mimeType: 'image/png',
+                sizes: ['512x512', '128x128'],
+              },
+            ],
+          }
+        : {}),
     },
     {
       instructions:

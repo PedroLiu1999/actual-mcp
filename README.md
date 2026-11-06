@@ -1,20 +1,22 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo/dist/actual-mcp-horizontal-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo/dist/actual-mcp-horizontal.svg">
-    <img alt="actual-mcp logo" src="docs/assets/logo/dist/actual-mcp-horizontal.svg" width="460">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/docs/assets/logo/dist/actual-mcp-horizontal-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/docs/assets/logo/dist/actual-mcp-horizontal.svg">
+    <img alt="actual-mcp logo" src="https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/docs/assets/logo/dist/actual-mcp-horizontal.svg" width="460">
   </picture>
 </p>
 
 # actual-mcp
 
 <p align="center">
-  <a href="https://github.com/PedroLiu1999/actual-mcp/actions/workflows/ci.yml"><img src="https://github.com/PedroLiu1999/actual-mcp/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/PedroLiu1999/actual-mcp/actions/workflows/docker-publish.yml"><img src="https://github.com/PedroLiu1999/actual-mcp/actions/workflows/docker-publish.yml/badge.svg" alt="Docker"></a>
-  <a href="https://github.com/PedroLiu1999/actual-mcp/releases"><img src="https://img.shields.io/github/v/release/PedroLiu1999/actual-mcp?color=blue&label=version" alt="GitHub Release"></a>
-  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg" alt="Node Version"></a>
-  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-Streamable%20HTTP-blueviolet.svg" alt="Model Context Protocol"></a>
-  <a href="https://mcpservers.org/servers/pedroliu1999/actual-mcp"><img src="https://mcpservers.org/badge.svg" alt="Listed on mcpservers.org"></a>
+
+[![CI](https://github.com/PedroLiu1999/actual-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/PedroLiu1999/actual-mcp/actions/workflows/ci.yml)
+[![Docker](https://github.com/PedroLiu1999/actual-mcp/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/PedroLiu1999/actual-mcp/actions/workflows/docker-publish.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/PedroLiu1999/actual-mcp?color=blue&label=version)](https://github.com/PedroLiu1999/actual-mcp/releases)
+[![Node Version](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg)](https://nodejs.org/)
+[![Model Context Protocol](https://img.shields.io/badge/MCP-Streamable%20HTTP-blueviolet.svg)](https://modelcontextprotocol.io/)
+[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/pedroliu1999/actual-mcp)
+
 </p>
 
 A self-contained Model Context Protocol (MCP) server that connects a self-hosted [Actual Budget](https://actualbudget.org/) instance to AI assistants, including Claude Desktop, Cursor, Google Gemini, and custom agents. The server communicates over Streamable HTTP (`POST /mcp`) and includes an embedded OAuth 2.1 server that supports PKCE and RFC 7591 dynamic client registration.

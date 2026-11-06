@@ -1,9 +1,7 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/docs/assets/logo/dist/actual-mcp-horizontal-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/docs/assets/logo/dist/actual-mcp-horizontal.svg">
-    <img alt="actual-mcp logo" src="https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/docs/assets/logo/dist/actual-mcp-horizontal.svg" width="460">
-  </picture>
+
+![actual-mcp logo](https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/docs/assets/logo/dist/actual-mcp-horizontal.svg)
+
 </p>
 
 # actual-mcp

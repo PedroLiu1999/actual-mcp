@@ -203,9 +203,9 @@ finish() {
 # ──────────────────────────────────────────────────────────────────────────
 
 join_by() {
-  local d="$1"; shift; local f="${1:-}"; shift || true
-  if [[ -z "$f" ]]; then return 0; fi
-  printf '%s' "$f" "${@/#/$d}"
+  local delim="$1"; shift; local first_item="${1:-}"; shift || true
+  if [[ -z "$first_item" ]]; then return 0; fi
+  printf '%s' "$first_item" "${@/#/$delim}"
 }
 
 # Generate a cryptographically secure 32-character hexadecimal passphrase (128-bit entropy)
@@ -394,6 +394,10 @@ elif [[ -n "$(_existing 'OAUTH_ALLOWED_REDIRECT_URIS' || true)" ]]; then
   fi
   if [[ "$EXISTING_REDIRECTS" == *"localhost"* || "$EXISTING_REDIRECTS" == *"127.0.0.1"* ]]; then
     DEFAULT_NUMS+=("2" "3")
+    # If upgrading from a loopback-only configuration, suggest Google Gemini as well
+    if [[ "$EXISTING_REDIRECTS" != *"googleusercontent"* && "$EXISTING_REDIRECTS" != *"vertexaisearch"* ]]; then
+      DEFAULT_NUMS=("1" "${DEFAULT_NUMS[@]}")
+    fi
   fi
   if [[ "$EXISTING_REDIRECTS" == *"chatgpt"* || "$EXISTING_REDIRECTS" == *"openai"* ]]; then
     DEFAULT_NUMS+=("4")
@@ -416,8 +420,7 @@ REDIRECT_URIS=("http://localhost" "http://127.0.0.1")
 if (( SELECTED_GEMINI )); then
   SELECTED_NAMES+=("Google Gemini")
   SELECTED_KEYS+=("gemini")
-  REDIRECT_URIS+=("https://oauth-redirect.googleusercontent.com/r/")
-  REDIRECT_URIS+=("https://oauth-redirect.googleusercontent.com/a/")
+  REDIRECT_URIS+=("https://oauth-redirect.googleusercontent.com/")
   REDIRECT_URIS+=("https://vertexaisearch.cloud.google.com/oauth-redirect")
 fi
 

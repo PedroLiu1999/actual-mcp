@@ -74,24 +74,18 @@ export function isAllowedRedirectUri(
         return true;
       }
 
-      // Non-loopback matching
+      // Non-loopback prefix matching if allowed URI ends with '/' (e.g. https://oauth-redirect.googleusercontent.com/)
       if (
         !isLoopbackCandidate &&
         parsedAllowed.protocol === parsed.protocol &&
-        parsedAllowed.hostname === parsed.hostname
+        parsedAllowed.hostname === parsed.hostname &&
+        allowed.endsWith('/')
       ) {
-        // Any path on Google OAuth redirect service is permitted when oauth-redirect.googleusercontent.com is in allowed list
-        if (parsedAllowed.hostname === 'oauth-redirect.googleusercontent.com') {
+        const allowedBasePath = parsedAllowed.pathname.endsWith('/')
+          ? parsedAllowed.pathname
+          : `${parsedAllowed.pathname}/`;
+        if (parsed.pathname.startsWith(allowedBasePath)) {
           return true;
-        }
-
-        if (allowed.endsWith('/')) {
-          const allowedBasePath = parsedAllowed.pathname.endsWith('/')
-            ? parsedAllowed.pathname
-            : `${parsedAllowed.pathname}/`;
-          if (parsed.pathname.startsWith(allowedBasePath)) {
-            return true;
-          }
         }
       }
     } catch {
@@ -230,7 +224,7 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
         const clientSecretExpiresAt = isPublicClient ? undefined : client.client_secret_expires_at;
         const authMethod = isPublicClient
           ? 'none'
-          : (client.token_endpoint_auth_method ?? 'client_secret_post');
+          : (client.token_endpoint_auth_method ?? 'client_secret_basic');
 
         const redirectUris = client.redirect_uris ?? [];
         if (redirectUris.length === 0) {

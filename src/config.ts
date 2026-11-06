@@ -21,10 +21,6 @@ const redirectUriSchema = z.string().url().refine((val) => {
 export const DEFAULT_ALLOWED_REDIRECT_URIS = [
   'http://localhost',
   'http://127.0.0.1',
-  'https://oauth-redirect.googleusercontent.com/',
-  'https://oauth-redirect.googleusercontent.com/r/',
-  'https://oauth-redirect.googleusercontent.com/a/',
-  'https://vertexaisearch.cloud.google.com/oauth-redirect',
 ];
 
 const configSchema = z.object({

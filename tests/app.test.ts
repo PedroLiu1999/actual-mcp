@@ -161,7 +161,7 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     expect(res.body.jsonrpc).toBe('2.0');
     expect(res.body.id).toBe(1);
     expect(res.body.result.serverInfo.name).toBe('actual-mcp');
-    expect(res.body.result.serverInfo.version).toBe('0.4.3');
+    expect(res.body.result.serverInfo.version).toBe('0.4.4');
     expect(res.body.result.serverInfo.icons).toEqual([
       {
         src: expect.stringMatching(/^data:image\/png;base64,/),

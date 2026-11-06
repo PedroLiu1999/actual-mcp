@@ -23,10 +23,6 @@ describe('loadConfig', () => {
       OAUTH_ALLOWED_REDIRECT_URIS: [
         'http://localhost',
         'http://127.0.0.1',
-        'https://oauth-redirect.googleusercontent.com/',
-        'https://oauth-redirect.googleusercontent.com/r/',
-        'https://oauth-redirect.googleusercontent.com/a/',
-        'https://vertexaisearch.cloud.google.com/oauth-redirect',
       ],
       ACTUAL_SERVER_URL: 'http://host.docker.internal:5006',
       ACTUAL_PASSWORD: 'actual-server-password',

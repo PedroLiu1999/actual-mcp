@@ -19,6 +19,7 @@ import {
   EmbeddedOAuthProvider,
   SUPPORTED_TOKEN_ENDPOINT_AUTH_METHODS,
 } from './auth/provider.js';
+import { normalizeRegistrationBody } from './auth/registration.js';
 import type { AppConfig } from './config.js';
 import type { BudgetGateway } from './gateway/types.js';
 import { BRAND_ICON_DATA_URI } from './mcp/icon.js';
@@ -189,6 +190,8 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
       };
 
       if (req.method === 'POST') {
+        req.body = normalizeRegistrationBody(req.body);
+
         console.log(`[register] 📥 incoming registration request:`, {
           contentType: req.headers['content-type'],
           userAgent: req.headers['user-agent'],
@@ -196,54 +199,9 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
         });
 
         if (req.body && typeof req.body === 'object') {
-          // 1. Normalize singular redirect_uri to redirect_uris array
-          if (req.body.redirect_uri && !req.body.redirect_uris) {
-            req.body.redirect_uris = [req.body.redirect_uri];
-          } else if (typeof req.body.redirect_uris === 'string') {
-            req.body.redirect_uris = req.body.redirect_uris
-              .split(',')
-              .map((s: string) => s.trim())
-              .filter(Boolean);
-          }
-
-          // 2. Normalize scope / scopes (array vs string)
-          if (Array.isArray(req.body.scope)) {
-            req.body.scope = req.body.scope.join(' ');
-          } else if (!req.body.scope && Array.isArray(req.body.scopes)) {
-            req.body.scope = req.body.scopes.join(' ');
-          } else if (!req.body.scope && typeof req.body.scopes === 'string') {
-            req.body.scope = req.body.scopes;
-          }
-
-          // 3. Normalize grant_types & response_types
-          if (typeof req.body.grant_types === 'string') {
-            req.body.grant_types = req.body.grant_types
-              .split(',')
-              .map((s: string) => s.trim())
-              .filter(Boolean);
-          }
-          if (typeof req.body.response_types === 'string') {
-            req.body.response_types = req.body.response_types
-              .split(',')
-              .map((s: string) => s.trim())
-              .filter(Boolean);
-          }
-
-          // 4. Normalize contacts
-          if (typeof req.body.contacts === 'string') {
-            req.body.contacts = [req.body.contacts];
-          }
-
-          // 5. Remove empty string fields that fail Zod url validation
-          for (const key of ['client_uri', 'logo_uri', 'tos_uri', 'policy_uri', 'jwks_uri']) {
-            if (req.body[key] === '') {
-              delete req.body[key];
-            }
-          }
-
-          // 6. Record candidate redirect URIs
-          if (Array.isArray(req.body.redirect_uris)) {
-            for (const uri of req.body.redirect_uris) {
+          const candidateUris = (req.body as Record<string, unknown>).redirect_uris;
+          if (Array.isArray(candidateUris)) {
+            for (const uri of candidateUris) {
               oauthProvider.recordCandidateRedirectUri(uri);
             }
           }

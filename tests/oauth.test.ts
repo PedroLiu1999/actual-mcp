@@ -38,6 +38,8 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       PORT: '3000',
       DATA_DIR: tempDataDir,
       OAUTH_ADMIN_PASSWORD: 'correct-horse-battery-staple',
+      OAUTH_ALLOWED_REDIRECT_URIS:
+        'http://localhost,http://127.0.0.1,https://oauth-redirect.googleusercontent.com/,https://vertexaisearch.cloud.google.com/oauth-redirect',
       ACTUAL_SERVER_URL: 'http://localhost:5006',
       ACTUAL_PASSWORD: 'actual-password',
       ACTUAL_SYNC_ID: '11111111-2222-3333-4444-555555555555',
@@ -127,6 +129,8 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       PORT: '3000',
       DATA_DIR: tempDataDir,
       OAUTH_ADMIN_PASSWORD: 'correct-horse-battery-staple',
+      OAUTH_ALLOWED_REDIRECT_URIS:
+        'http://localhost,http://127.0.0.1,https://oauth-redirect.googleusercontent.com/,https://vertexaisearch.cloud.google.com/oauth-redirect',
       ACTUAL_SERVER_URL: 'http://localhost:5006',
       ACTUAL_PASSWORD: 'actual-password',
       ACTUAL_SYNC_ID: 'sync-id',
@@ -913,7 +917,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       });
     expect(registerDefaultRes.status).toBe(201);
     expect(registerDefaultRes.body.client_secret).toBeDefined();
-    expect(registerDefaultRes.body.token_endpoint_auth_method).toBe('client_secret_post');
+    expect(registerDefaultRes.body.token_endpoint_auth_method).toBe('client_secret_basic');
 
     // Dynamic registration resilience variants (Google OpenAuth / client quirks)
     // A: Singular redirect_uri instead of redirect_uris array

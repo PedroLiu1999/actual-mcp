@@ -442,7 +442,7 @@ fi
 if (( SELECTED_CLAUDE )); then
   SELECTED_NAMES+=("Claude")
   SELECTED_KEYS+=("claude")
-  REDIRECT_URIS+=("https://claude.ai/api/mcp/oauth/callback")
+  REDIRECT_URIS+=("https://claude.ai/api/mcp/auth_callback")
 fi
 
 if (( SELECTED_CURSOR )); then

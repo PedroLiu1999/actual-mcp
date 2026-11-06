@@ -44,7 +44,7 @@ Users configuring and running `actual-mcp` face three interconnected authenticat
      - Claude Desktop (`http://localhost`)
      - Cursor (`http://127.0.0.1`)
      - ChatGPT (`https://chatgpt.com/aip/`)
-     - Claude Web (`https://claude.ai/api/mcp/oauth/callback`)
+     - Claude Web (`https://claude.ai/api/mcp/auth_callback`)
    - Auto-populates `OAUTH_ALLOWED_REDIRECT_URIS` in `.env` based on selections.
    - When inspecting existing configuration, if upgrading, prompts user to select clients and merges selections.
    - Refactor parameter names in helper functions (`join_by`) to descriptive identifiers (`delim`, `first_item`).

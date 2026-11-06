@@ -74,7 +74,7 @@ export function isAllowedRedirectUri(
         return true;
       }
 
-      // Non-loopback prefix matching if allowed URI ends with '/' (e.g. https://oauth-redirect.googleusercontent.com/)
+      // Non-loopback prefix matching if allowed URI ends with '/' (e.g. https://oauth-redirect.googleusercontent.com/r/)
       if (
         !isLoopbackCandidate &&
         parsedAllowed.protocol === parsed.protocol &&

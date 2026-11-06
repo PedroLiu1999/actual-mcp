@@ -39,7 +39,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       DATA_DIR: tempDataDir,
       OAUTH_ADMIN_PASSWORD: 'correct-horse-battery-staple',
       OAUTH_ALLOWED_REDIRECT_URIS:
-        'http://localhost,http://127.0.0.1,https://oauth-redirect.googleusercontent.com/,https://vertexaisearch.cloud.google.com/oauth-redirect',
+        'http://localhost,http://127.0.0.1,https://oauth-redirect.googleusercontent.com/r/,https://oauth-redirect.googleusercontent.com/a/,https://oauth-redirect-sandbox.googleusercontent.com/r/,https://oauth-redirect-sandbox.googleusercontent.com/a/,https://oauth-redirect-test.googleusercontent.com/r/,https://oauth-redirect-test.googleusercontent.com/a/,https://vertexaisearch.cloud.google.com/oauth-redirect',
       ACTUAL_SERVER_URL: 'http://localhost:5006',
       ACTUAL_PASSWORD: 'actual-password',
       ACTUAL_SYNC_ID: '11111111-2222-3333-4444-555555555555',
@@ -130,7 +130,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       DATA_DIR: tempDataDir,
       OAUTH_ADMIN_PASSWORD: 'correct-horse-battery-staple',
       OAUTH_ALLOWED_REDIRECT_URIS:
-        'http://localhost,http://127.0.0.1,https://oauth-redirect.googleusercontent.com/,https://vertexaisearch.cloud.google.com/oauth-redirect',
+        'http://localhost,http://127.0.0.1,https://oauth-redirect.googleusercontent.com/r/,https://oauth-redirect.googleusercontent.com/a/,https://oauth-redirect-sandbox.googleusercontent.com/r/,https://oauth-redirect-sandbox.googleusercontent.com/a/,https://oauth-redirect-test.googleusercontent.com/r/,https://oauth-redirect-test.googleusercontent.com/a/,https://vertexaisearch.cloud.google.com/oauth-redirect',
       ACTUAL_SERVER_URL: 'http://localhost:5006',
       ACTUAL_PASSWORD: 'actual-password',
       ACTUAL_SYNC_ID: 'sync-id',
@@ -927,13 +927,13 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
       .set('Content-Type', 'application/json')
       .send({
         client_name: 'Singular redirect_uri Client',
-        redirect_uri: 'https://oauth-redirect.googleusercontent.com/custom-google-path',
+        redirect_uri: 'https://oauth-redirect.googleusercontent.com/r/custom-google-path',
         scope: ['mcp:tools'],
         client_uri: '',
       });
     expect(registerSingularRes.status).toBe(201);
     expect(registerSingularRes.body.redirect_uris).toEqual([
-      'https://oauth-redirect.googleusercontent.com/custom-google-path',
+      'https://oauth-redirect.googleusercontent.com/r/custom-google-path',
     ]);
     expect(registerSingularRes.body.client_secret).toBeDefined();
 
@@ -950,6 +950,30 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     expect(registerFormRes.status).toBe(201);
     expect(registerFormRes.body.redirect_uris).toEqual(['http://localhost:54321/form-callback']);
     expect(registerFormRes.body.client_secret).toBeDefined();
+
+    // C: Real-world Google OpenAuth multi-environment payload from Gemini Connected Apps
+    const registerGoogleRealPayloadRes = await request(appRestarted)
+      .post('/register')
+      .set('Host', 'mcp.example.com')
+      .set('User-Agent', 'OpenAuth')
+      .set('Content-Type', 'application/json')
+      .send({
+        client_name: 'Google',
+        redirect_uris: [
+          'https://oauth-redirect-sandbox.googleusercontent.com/r/user_bound_custom-mcp-107817641131327074800-mcp_peliu_uk',
+          'https://oauth-redirect-test.googleusercontent.com/r/user_bound_custom-mcp-107817641131327074800-mcp_peliu_uk',
+          'https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-107817641131327074800-mcp_peliu_uk',
+          'https://oauth-redirect-sandbox.googleusercontent.com/a/user_bound_custom-mcp-107817641131327074800-mcp_peliu_uk',
+          'https://oauth-redirect-test.googleusercontent.com/a/user_bound_custom-mcp-107817641131327074800-mcp_peliu_uk',
+          'https://oauth-redirect.googleusercontent.com/a/user_bound_custom-mcp-107817641131327074800-mcp_peliu_uk',
+        ],
+        response_types: ['code'],
+        grant_types: ['authorization_code', 'refresh_token'],
+        token_endpoint_auth_method: 'client_secret_post',
+      });
+    expect(registerGoogleRealPayloadRes.status).toBe(201);
+    expect(registerGoogleRealPayloadRes.body.client_secret).toBeDefined();
+    expect(registerGoogleRealPayloadRes.body.redirect_uris).toHaveLength(6);
 
     // 7. Prevent cross-client redirect URI leakage
     // Client A registers with a dedicated specific path

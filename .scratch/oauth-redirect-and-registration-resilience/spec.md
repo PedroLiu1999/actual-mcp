@@ -10,7 +10,7 @@ Users configuring and running `actual-mcp` face three interconnected authenticat
 ## Solution
 
 1. Restrict default `OAUTH_ALLOWED_REDIRECT_URIS` in code strictly to loopback (`http://localhost`, `http://127.0.0.1`). All remote callbacks must be configured via `.env`.
-2. Standardize Google Gemini's callback in `.env` and `scripts/setup-wizard.sh` to base `https://oauth-redirect.googleusercontent.com/` (without restrictive `/r/` or `/a/` subpaths), allowing standard trailing-slash prefix matching to handle all dynamic Google Gemini registration paths uniformly without special-cased code bypasses.
+2. Explicitly configure Google Gemini's multi-environment callback prefixes in `.env` and `scripts/setup-wizard.sh` (`https://oauth-redirect.googleusercontent.com/r/`, `https://oauth-redirect.googleusercontent.com/a/`, `https://oauth-redirect-sandbox.googleusercontent.com/r/`, `https://oauth-redirect-sandbox.googleusercontent.com/a/`, `https://oauth-redirect-test.googleusercontent.com/r/`, `https://oauth-redirect-test.googleusercontent.com/a/`, and `https://vertexaisearch.cloud.google.com/oauth-redirect`), allowing standard trailing-slash prefix matching to handle all dynamic Google Gemini registration paths uniformly without special-cased code bypasses.
 3. Use the agent multiselect pattern in `scripts/setup-wizard.sh` to auto-populate `OAUTH_ALLOWED_REDIRECT_URIS` in `.env` based on selected AI clients (Google Gemini, Claude Desktop, Cursor, ChatGPT, etc.), including during configuration upgrades.
 4. Set `client_secret_basic` as the default `token_endpoint_auth_method` when omitted in dynamic registration per RFC 7591 §2, while continuing to support `client_secret_basic`, `client_secret_post`, and `none`.
 5. Extract registration normalization into a dedicated auth module (`src/auth/registration.ts`), deduplicating comma-separated list splitting and keeping `src/app.ts` as a clean routing seam.
@@ -32,15 +32,15 @@ Users configuring and running `actual-mcp` face three interconnected authenticat
 
 1. **Default Allowlist Scope**:
    - `DEFAULT_ALLOWED_REDIRECT_URIS` in `src/config.ts` is strictly `['http://localhost', 'http://127.0.0.1']`.
-   - `.env.example` documents `OAUTH_ALLOWED_REDIRECT_URIS` with `http://localhost,http://127.0.0.1,https://oauth-redirect.googleusercontent.com/,https://vertexaisearch.cloud.google.com/oauth-redirect`.
+   - `.env.example` documents `OAUTH_ALLOWED_REDIRECT_URIS` with loopback and Google Gemini `/r/` and `/a/` endpoints across production, sandbox, and test environments.
 2. **Uniform Prefix Matching**:
    - Remove special-case hostname checks for Google in `isAllowedRedirectUri`. All remote HTTPS URLs are matched strictly if:
      - exact match with an allowed entry, OR
      - an allowed entry ends with `/` and the candidate URL's protocol, host, and path prefix match.
-   - For Google Gemini, the allowed entry `https://oauth-redirect.googleusercontent.com/` matches all subpaths (`/r/...`, `/a/...`, `/callback`, etc.).
+   - For Google Gemini, the allowed entries cover `https://oauth-redirect*.googleusercontent.com/r/` and `/a/` explicitly via `.env`.
 3. **Setup Wizard Agent Auto-population**:
    - `scripts/setup-wizard.sh` presents an AI client multiselect:
-     - Google Gemini (`https://oauth-redirect.googleusercontent.com/`)
+     - Google Gemini (`https://oauth-redirect*.googleusercontent.com/(r|a)/`)
      - Claude Desktop (`http://localhost`)
      - Cursor (`http://127.0.0.1`)
      - ChatGPT (`https://chatgpt.com/aip/`)

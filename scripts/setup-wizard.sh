@@ -430,7 +430,12 @@ REDIRECT_URIS=("http://localhost" "http://127.0.0.1")
 if (( SELECTED_GEMINI )); then
   SELECTED_NAMES+=("Google Gemini")
   SELECTED_KEYS+=("gemini")
-  REDIRECT_URIS+=("https://oauth-redirect.googleusercontent.com/")
+  REDIRECT_URIS+=("https://oauth-redirect.googleusercontent.com/r/")
+  REDIRECT_URIS+=("https://oauth-redirect.googleusercontent.com/a/")
+  REDIRECT_URIS+=("https://oauth-redirect-sandbox.googleusercontent.com/r/")
+  REDIRECT_URIS+=("https://oauth-redirect-sandbox.googleusercontent.com/a/")
+  REDIRECT_URIS+=("https://oauth-redirect-test.googleusercontent.com/r/")
+  REDIRECT_URIS+=("https://oauth-redirect-test.googleusercontent.com/a/")
   REDIRECT_URIS+=("https://vertexaisearch.cloud.google.com/oauth-redirect")
 fi
 

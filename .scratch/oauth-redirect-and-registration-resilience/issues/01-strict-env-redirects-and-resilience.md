@@ -21,4 +21,6 @@ Implement the decisions established in `.scratch/oauth-redirect-and-registration
 - Created `src/auth/registration.ts` exporting `parseList`, `normalizeRegistrationBody`, and `extractCandidateRedirectUris`, simplifying `src/app.ts`.
 - In `scripts/setup-wizard.sh`, updated Gemini preset to base `https://oauth-redirect.googleusercontent.com/`, explicitly surfaced Claude Web, refactored `join_by` parameter names (`delim`, `first_item`), and only pre-selected Gemini when upgrading from true loopback-only configurations.
 - Documented decisions in `docs/adr/0009-explicit-env-redirect-allowlist-and-registration-resilience.md` and added reciprocal amendment notes to ADR-0007 and ADR-0008.
-- All 15 test suites and 142 tests passing cleanly.
+- In `scripts/setup-wizard.sh` and `.env.example`, populated Google Gemini redirect URIs with explicit `/r/` and `/a/` endpoints across production, sandbox, and test environments (`https://oauth-redirect*.googleusercontent.com/(r|a)/`), maintaining strict environment-driven configuration without any hardcoded exceptions in code.
+- Updated ADR-0009 and spec accordingly.
+- Bumped version to 0.4.5; all 15 test suites and 142 tests passing cleanly.

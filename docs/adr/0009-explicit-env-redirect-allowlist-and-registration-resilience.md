@@ -17,9 +17,10 @@ ADR-0007 §3 and ADR-0008 implemented dynamic client registration (`/register`) 
    - All remote OAuth redirect URLs must be explicitly configured via `OAUTH_ALLOWED_REDIRECT_URIS` in `.env`.
    - Setup wizard (`scripts/setup-wizard.sh`) auto-populates `OAUTH_ALLOWED_REDIRECT_URIS` based on interactive AI client selection.
 
-2. **Standard Base URL Prefix Matching for Google Gemini**:
-   - Google Gemini's allowed callback entry in `.env` is standardized to `https://oauth-redirect.googleusercontent.com/` (base URL ending with `/`).
-   - Standard trailing-slash prefix matching in `isAllowedRedirectUri` cleanly validates all dynamic Google callbacks without hardcoded domain exceptions in code.
+2. **Explicit Multi-Environment and Subpath Prefix Matching for Google Gemini**:
+   - Google Gemini dynamic client registration submits redirect URIs across multiple environments (`oauth-redirect`, `oauth-redirect-sandbox`, and `oauth-redirect-test.googleusercontent.com`) across both `/r/` and `/a/` subpaths simultaneously.
+   - Rather than embedding vendor domain or hostname exceptions into validation code, all required callback prefixes (`https://oauth-redirect.googleusercontent.com/r/`, `https://oauth-redirect.googleusercontent.com/a/`, `https://oauth-redirect-sandbox.googleusercontent.com/r/`, `https://oauth-redirect-sandbox.googleusercontent.com/a/`, `https://oauth-redirect-test.googleusercontent.com/r/`, `https://oauth-redirect-test.googleusercontent.com/a/`, and `https://vertexaisearch.cloud.google.com/oauth-redirect`) are explicitly configured in `OAUTH_ALLOWED_REDIRECT_URIS` and auto-populated by the setup wizard when Google Gemini is selected.
+   - Standard trailing-slash prefix matching in `isAllowedRedirectUri` cleanly validates all dynamic callbacks uniformly without any vendor-specific bypasses in code.
 
 3. **RFC 7591 §2 Conforming Default Auth Method**:
    - When `token_endpoint_auth_method` is omitted in dynamic client registration, the server defaults to `client_secret_basic` per RFC 7591 §2.

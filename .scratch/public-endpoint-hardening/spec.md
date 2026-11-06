@@ -1,6 +1,6 @@
 # Spec: Public Endpoint Security Hardening
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 

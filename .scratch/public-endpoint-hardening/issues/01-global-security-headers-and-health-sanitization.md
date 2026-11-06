@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `GET /authorize` and all API responses include `X-Frame-Options: DENY`.
 - [x] `GET /authorize` and all API responses include `Content-Security-Policy` with `frame-ancestors 'none'`.

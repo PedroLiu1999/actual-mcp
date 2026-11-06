@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `POST /token` enforces IP rate limiting (30 requests per minute per IP), returning HTTP 429 Too Many Requests when the limit is exceeded.
 - [x] `POST /revoke` enforces IP rate limiting (30 requests per minute per IP), returning HTTP 429 Too Many Requests when the limit is exceeded.

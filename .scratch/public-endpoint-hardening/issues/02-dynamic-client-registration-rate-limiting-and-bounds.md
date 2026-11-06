@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `POST /register` enforces IP rate limiting (5 requests per 15 minutes per IP), returning HTTP 429 Too Many Requests with standard rate limit headers when exceeded.
 - [x] The persistent token store enforces a maximum ceiling of 20 registered clients.

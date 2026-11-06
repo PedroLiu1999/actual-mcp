@@ -74,18 +74,24 @@ export function isAllowedRedirectUri(
         return true;
       }
 
-      // Non-loopback prefix matching if allowed URI ends with '/' (e.g. https://oauth-redirect.googleusercontent.com/r/)
+      // Non-loopback matching
       if (
         !isLoopbackCandidate &&
         parsedAllowed.protocol === parsed.protocol &&
-        parsedAllowed.hostname === parsed.hostname &&
-        allowed.endsWith('/')
+        parsedAllowed.hostname === parsed.hostname
       ) {
-        const allowedBasePath = parsedAllowed.pathname.endsWith('/')
-          ? parsedAllowed.pathname
-          : `${parsedAllowed.pathname}/`;
-        if (parsed.pathname.startsWith(allowedBasePath)) {
+        // Any path on Google OAuth redirect service is permitted when oauth-redirect.googleusercontent.com is in allowed list
+        if (parsedAllowed.hostname === 'oauth-redirect.googleusercontent.com') {
           return true;
+        }
+
+        if (allowed.endsWith('/')) {
+          const allowedBasePath = parsedAllowed.pathname.endsWith('/')
+            ? parsedAllowed.pathname
+            : `${parsedAllowed.pathname}/`;
+          if (parsed.pathname.startsWith(allowedBasePath)) {
+            return true;
+          }
         }
       }
     } catch {

@@ -915,6 +915,38 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     expect(registerDefaultRes.body.client_secret).toBeDefined();
     expect(registerDefaultRes.body.token_endpoint_auth_method).toBe('client_secret_post');
 
+    // Dynamic registration resilience variants (Google OpenAuth / client quirks)
+    // A: Singular redirect_uri instead of redirect_uris array
+    const registerSingularRes = await request(appRestarted)
+      .post('/register')
+      .set('Host', 'mcp.example.com')
+      .set('Content-Type', 'application/json')
+      .send({
+        client_name: 'Singular redirect_uri Client',
+        redirect_uri: 'https://oauth-redirect.googleusercontent.com/custom-google-path',
+        scope: ['mcp:tools'],
+        client_uri: '',
+      });
+    expect(registerSingularRes.status).toBe(201);
+    expect(registerSingularRes.body.redirect_uris).toEqual([
+      'https://oauth-redirect.googleusercontent.com/custom-google-path',
+    ]);
+    expect(registerSingularRes.body.client_secret).toBeDefined();
+
+    // B: Form-urlencoded POST /register with comma-separated redirect_uris
+    const registerFormRes = await request(appRestarted)
+      .post('/register')
+      .set('Host', 'mcp.example.com')
+      .type('form')
+      .send({
+        client_name: 'Form-encoded Client',
+        redirect_uri: 'http://localhost:54321/form-callback',
+        token_endpoint_auth_method: 'client_secret_post',
+      });
+    expect(registerFormRes.status).toBe(201);
+    expect(registerFormRes.body.redirect_uris).toEqual(['http://localhost:54321/form-callback']);
+    expect(registerFormRes.body.client_secret).toBeDefined();
+
     // 7. Prevent cross-client redirect URI leakage
     // Client A registers with a dedicated specific path
     const registerDedicatedRes = await request(appRestarted)

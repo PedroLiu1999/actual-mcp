@@ -4,11 +4,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `GET /authorize` and all API responses include `X-Frame-Options: DENY`.
-- [ ] `GET /authorize` and all API responses include `Content-Security-Policy` with `frame-ancestors 'none'`.
-- [ ] All server responses include `X-Content-Type-Options: nosniff`.
-- [ ] `GET /healthz` returns `status: "ok"` along with `ready` (boolean) and `lastSyncedAt` (string or null).
-- [ ] `GET /healthz` does not include `syncId` in its response body.
-- [ ] Integration tests at the HTTP application seam verify the presence of all security headers and assert that `syncId` is omitted from `/healthz`.
+- [x] `GET /authorize` and all API responses include `X-Frame-Options: DENY`.
+- [x] `GET /authorize` and all API responses include `Content-Security-Policy` with `frame-ancestors 'none'`.
+- [x] All server responses include `X-Content-Type-Options: nosniff`.
+- [x] `GET /healthz` returns `status: "ok"` along with `ready` (boolean) and `lastSyncedAt` (string or null).
+- [x] `GET /healthz` does not include `syncId` in its response body.
+- [x] Integration tests at the HTTP application seam verify the presence of all security headers and assert that `syncId` is omitted from `/healthz`.

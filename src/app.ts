@@ -37,6 +37,13 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
   const app = express();
   app.set('trust proxy', 1);
 
+  app.use((_req, res, next) => {
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    next();
+  });
+
   const publicHostname = new URL(config.PUBLIC_URL).hostname;
   const allowedHosts = Array.from(
     new Set([publicHostname, 'localhost', '127.0.0.1', '[::1]']),
@@ -228,7 +235,10 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
     const readiness = budgetGateway.getReadiness();
     res.status(200).json({
       status: 'ok',
-      targetBudget: readiness,
+      targetBudget: {
+        ready: readiness.ready,
+        lastSyncedAt: readiness.lastSyncedAt,
+      },
     });
   });
 

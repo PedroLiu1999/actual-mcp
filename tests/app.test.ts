@@ -68,7 +68,7 @@ describe('HTTP application seam — healthz & host validation', () => {
     expect(app.get('trust proxy')).toBe(1);
   });
 
-  it('returns 200 OK with Target Budget readiness on GET /healthz without authentication', async () => {
+  it('returns 200 OK with Target Budget readiness on GET /healthz without authentication and omits syncId', async () => {
     const app = createApp({ config: testConfig, budgetGateway: createStubGateway() });
 
     const res = await request(app)
@@ -80,10 +80,38 @@ describe('HTTP application seam — healthz & host validation', () => {
       status: 'ok',
       targetBudget: {
         ready: true,
-        syncId: '11111111-2222-3333-4444-555555555555',
         lastSyncedAt: '2026-11-04T17:00:00.000Z',
       },
     });
+    expect(res.body).not.toHaveProperty('syncId');
+    expect(res.body.targetBudget).not.toHaveProperty('syncId');
+  });
+
+  it('includes global defensive HTTP security headers on GET /authorize and all endpoints', async () => {
+    const app = createApp({ config: testConfig, budgetGateway: createStubGateway() });
+
+    const endpoints = [
+      { method: 'get' as const, path: '/healthz' },
+      { method: 'get' as const, path: '/.well-known/oauth-authorization-server' },
+      { method: 'get' as const, path: '/logo.svg' },
+      {
+        method: 'get' as const,
+        path: '/authorize?response_type=code&client_id=client-1&redirect_uri=http://localhost:54321/callback&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256',
+      },
+    ];
+
+    for (const ep of endpoints) {
+      const res = await request(app)[ep.method](ep.path).set('Host', 'mcp.example.com');
+      expect(res.headers['x-frame-options'], `missing X-Frame-Options on ${ep.path}`).toBe('DENY');
+      expect(
+        res.headers['content-security-policy'],
+        `missing Content-Security-Policy on ${ep.path}`,
+      ).toBe("frame-ancestors 'none'");
+      expect(
+        res.headers['x-content-type-options'],
+        `missing X-Content-Type-Options on ${ep.path}`,
+      ).toBe('nosniff');
+    }
   });
 
   it('allows requests with Host matching PUBLIC_URL hostname, localhost, and 127.0.0.1, and rejects unrecognized Host headers with 403', async () => {

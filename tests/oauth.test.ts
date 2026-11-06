@@ -183,6 +183,9 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
 
       expect(res.status, `Expected 200 for allowed redirect_uri ${redirectUri}`).toBe(200);
       expect(res.headers['content-type']).toMatch(/text\/html/);
+      expect(res.headers['x-frame-options']).toBe('DENY');
+      expect(res.headers['content-security-policy']).toBe("frame-ancestors 'none'");
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
       expect(res.text).toContain('any-dynamic-client-id');
       expect(res.text).toContain('/logo.png');
       expect(res.text).toMatch(/type="password"/);

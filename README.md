@@ -4,8 +4,6 @@
 
 </div>
 
-# actual-mcp
-
 <div align="center">
 
 [![CI](https://github.com/PedroLiu1999/actual-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/PedroLiu1999/actual-mcp/actions/workflows/ci.yml)

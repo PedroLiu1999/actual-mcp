@@ -14,6 +14,7 @@
   <a href="https://github.com/PedroLiu1999/actual-mcp/releases"><img src="https://img.shields.io/github/v/release/PedroLiu1999/actual-mcp?color=blue&label=version" alt="GitHub Release"></a>
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg" alt="Node Version"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-Streamable%20HTTP-blueviolet.svg" alt="Model Context Protocol"></a>
+  <a href="https://mcpservers.org/servers/pedroliu1999/actual-mcp"><img src="https://mcpservers.org/badge.svg" alt="Listed on mcpservers.org"></a>
 </p>
 
 A self-contained Model Context Protocol (MCP) server that connects a self-hosted [Actual Budget](https://actualbudget.org/) instance to AI assistants, including Claude Desktop, Cursor, Google Gemini, and custom agents. The server communicates over Streamable HTTP (`POST /mcp`) and includes an embedded OAuth 2.1 server that supports PKCE and RFC 7591 dynamic client registration.

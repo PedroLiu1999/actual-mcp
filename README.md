@@ -16,9 +16,9 @@
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-Streamable%20HTTP-blueviolet.svg" alt="Model Context Protocol"></a>
 </p>
 
-A self-contained Model Context Protocol (MCP) server that connects a self-hosted [Actual Budget](https://actualbudget.org/) instance to **AI assistants (Claude Desktop, Cursor, Google Gemini, and custom agents)** over **Streamable HTTP** (`POST /mcp`) and an **Embedded OAuth Server** (OAuth 2.1 Public Client + PKCE).
+A self-contained Model Context Protocol (MCP) server that connects a self-hosted [Actual Budget](https://actualbudget.org/) instance to AI assistants, including Claude Desktop, Cursor, Google Gemini, and custom agents. The server communicates over Streamable HTTP (`POST /mcp`) and includes an embedded OAuth 2.1 server that supports PKCE and RFC 7591 dynamic client registration.
 
-Designed for single-user VPS deployments where `actual-server` and `cloudflared` (Cloudflare Tunnel) are already running, `actual-mcp` packages the `@actual-app/api` (`loot-core`) Node.js engine, a persistent local SQLite **Budget Cache**, and a zero-dependency **Embedded OAuth Server** into a single lightweight Docker container.
+Designed for single-user VPS deployments running `actual-server` and `cloudflared` (Cloudflare Tunnel), `actual-mcp` packages `@actual-app/api` (`loot-core`), a local SQLite budget cache, and the embedded OAuth server in one Docker container.
 
 ---
 
@@ -28,174 +28,176 @@ Designed for single-user VPS deployments where `actual-server` and `cloudflared`
 
 ---
 
-## MCP Tools Reference (all 39 MCP tools & extended lifecycle capabilities)
+## MCP tools reference
 
-`actual-mcp` v0.4.2 documents and provides all 39 MCP tools (11 read, 28 write across Categories, Category Groups, Payees, Accounts, Bank Sync, Budget Adjustments, Recurring Schedules, and Automation Rules). All tools return structured JSON serialized in MCP text content blocks and include MCP safety annotations (`readOnlyHint`, `destructiveHint`).
+`actual-mcp` provides all 39 MCP tools: 11 read tools and 28 write tools across categories, category groups, payees, accounts, bank synchronization, budget adjustments, recurring schedules, and automation rules. Every tool returns structured JSON in MCP text content blocks and includes safety annotations (`readOnlyHint`, `destructiveHint`).
 
-### Read Tools (`readOnlyHint: true`, `destructiveHint: false`)
+### Read tools (`readOnlyHint: true`, `destructiveHint: false`)
 
 <details>
-<summary><strong>View Read Tools (11 tools)</strong></summary>
+<summary><strong>View read tools (11 tools)</strong></summary>
 
 | Tool | Description | Parameters |
 | :--- | :--- | :--- |
-| `list_accounts` | List all accounts in the **Target Budget** with ID, name, `offbudget` flag, `closed` flag, and current balance as a **Decimal Amount**. | `forceSync?` (`boolean`) |
-| `get_transactions` | Query transactions with enriched `accountName`, `categoryName`, and `payeeName` alongside IDs and **Decimal Amounts**. | `accountId?` (`string`), `startDate?` (`YYYY-MM-DD`), `endDate?` (`YYYY-MM-DD`), `categoryId?` (`string`), `payeeId?` (`string`), `searchText?` (`string`, case-insensitive match on payee/notes), `limit?` (`1..500`, default `100`), `forceSync?` (`boolean`) |
-| `get_spending_summary` | Aggregate transactions over a date range into a **Spending Summary** grouped by `'category'`, `'payee'`, or `'month'` with split transactions inlined (`splits: 'inline'`). Excludes internal transfers and off-budget accounts by default. | `startDate` (`YYYY-MM-DD`, required), `endDate` (`YYYY-MM-DD`, required), `groupBy?` (`'category' \| 'payee' \| 'month'`, default `'category'`), `includeTransfers?` (`boolean`, default `false`), `includeOffBudget?` (`boolean`, default `false`), `forceSync?` (`boolean`) |
-| `run_aql_query` | Execute a Zod-validated, read-only **Structured AQL Query** against `@actual-app/api`'s `q(table)` builder and `aqlQuery()`, converting monetary fields to **Decimal Amounts**. | `table` (`'transactions' \| 'accounts' \| 'categories' \| 'category_groups' \| 'payees' \| 'schedules' \| 'rules'`), `filter?` (`object`), `select?` (`string \| Array<string \| object>`), `groupBy?` (`string \| string[]`), `orderBy?` (`string \| object \| Array`), `limit?` (`1..1000`, default `100`), `offset?` (`number`), `splits?` (`'inline' \| 'grouped' \| 'all'`, default `'inline'`), `forceSync?` (`boolean`) |
-| `list_categories` | List all category groups and their categories (`id`, `name`, `group_id`, `is_income`, `hidden`). | `forceSync?` (`boolean`) |
+| `list_accounts` | List all accounts in the target budget with ID, name, `offbudget` flag, `closed` flag, and current balance as a decimal amount. | `forceSync?` (`boolean`) |
+| `get_transactions` | Query transactions with enriched `accountName`, `categoryName`, and `payeeName` alongside IDs and decimal amounts. | `accountId?` (`string`), `startDate?` (`YYYY-MM-DD`), `endDate?` (`YYYY-MM-DD`), `categoryId?` (`string`), `payeeId?` (`string`), `searchText?` (`string`, case-insensitive match on payee or notes), `limit?` (`1..500`, default `100`), `forceSync?` (`boolean`) |
+| `get_spending_summary` | Aggregate transactions over a date range into a spending summary grouped by `'category'`, `'payee'`, or `'month'` with split transactions inlined. Excludes internal transfers and off-budget accounts by default. | `startDate` (`YYYY-MM-DD`, required), `endDate` (`YYYY-MM-DD`, required), `groupBy?` (`'category' \| 'payee' \| 'month'`, default `'category'`), `includeTransfers?` (`boolean`, default `false`), `includeOffBudget?` (`boolean`, default `false`), `forceSync?` (`boolean`) |
+| `run_aql_query` | Execute a validated, read-only AQL query against `@actual-app/api` and convert monetary fields to decimal amounts. | `table` (`'transactions' \| 'accounts' \| 'categories' \| 'category_groups' \| 'payees' \| 'schedules' \| 'rules'`), `filter?` (`object`), `select?` (`string \| Array<string \| object>`), `groupBy?` (`string \| string[]`), `orderBy?` (`string \| object \| Array`), `limit?` (`1..1000`, default `100`), `offset?` (`number`), `splits?` (`'inline' \| 'grouped' \| 'all'`, default `'inline'`), `forceSync?` (`boolean`) |
+| `list_categories` | List all category groups and their child categories (`id`, `name`, `group_id`, `is_income`, `hidden`). | `forceSync?` (`boolean`) |
 | `list_payees` | List all payees (`id`, `name`, `transfer_acct`). | `forceSync?` (`boolean`) |
-| `list_budget_months` | List available `YYYY-MM` **Budget Months** in the **Target Budget**. | `forceSync?` (`boolean`) |
-| `get_budget_month` | Inspect a `YYYY-MM` **Budget Month** envelope summary (`toBudget`, `totalIncome`, `totalBudgeted`, `totalSpent`, `totalBalance`, and per-category `budgeted`, `spent`, `balance`, `carryover` in **Decimal Amounts**). | `month` (`YYYY-MM`, required), `forceSync?` (`boolean`) |
-| `list_schedules` | List all recurring schedules in the **Target Budget** with ID, name, rule ID, next date, completed flag, posts transaction flag, payee ID, account ID, **Decimal Amount**, amount operator, and recurrence date config. | `forceSync?` (`boolean`) |
-| `get_schedule_upcoming_dates` | Calculate upcoming occurrence dates for a schedule ID or date recurrence config over a given date range or count. | `scheduleId?` (`string`), `date?` (`string \| object`), `start?` (`YYYY-MM-DD`), `end?` (`YYYY-MM-DD`), `count?` (`number`, 1..100, default 10), `forceSync?` (`boolean`) |
-| `list_rules` | List all automation/categorization rules in the **Target Budget** with conditions, actions, stage, and operator, with optional payee filtering. Amounts in conditions and actions are converted to **Decimal Amounts**. | `payeeId?` (`string`), `forceSync?` (`boolean`) |
+| `list_budget_months` | List available `YYYY-MM` budget months in the target budget. | `forceSync?` (`boolean`) |
+| `get_budget_month` | Inspect a `YYYY-MM` budget month summary (`toBudget`, `totalIncome`, `totalBudgeted`, `totalSpent`, `totalBalance`, and per-category amounts in decimal units). | `month` (`YYYY-MM`, required), `forceSync?` (`boolean`) |
+| `list_schedules` | List all recurring schedules in the target budget with ID, name, rule ID, next date, completed flag, transaction posting flag, payee ID, account ID, decimal amount, amount operator, and recurrence configuration. | `forceSync?` (`boolean`) |
+| `get_schedule_upcoming_dates` | Calculate upcoming occurrence dates for a schedule ID or date recurrence configuration over a date range or count. | `scheduleId?` (`string`), `date?` (`string \| object`), `start?` (`YYYY-MM-DD`), `end?` (`YYYY-MM-DD`), `count?` (`number`, 1..100, default 10), `forceSync?` (`boolean`) |
+| `list_rules` | List all automation rules in the target budget with conditions, actions, stage, and operator, with optional payee filtering. Amounts in conditions and actions are converted to decimal amounts. | `payeeId?` (`string`), `forceSync?` (`boolean`) |
 
 </details>
 
-### Write & Lifecycle Tools (`readOnlyHint: false`)
+### Write tools (`readOnlyHint: false`)
 
 <details>
-<summary><strong>Transactions & Budget Amounts</strong> (4 tools)</summary>
+<summary><strong>Transactions and budget amounts (4 tools)</strong></summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
-| `create_transactions` | `false` | Create a batch of 1 to 50 transactions in an account using **Decimal Amounts**. Uses `importTransactions` by default (`runRules: true`) so payee matching/creation and Actual categorization rules run automatically, or `addTransactions` when `runRules: false`. | `accountId` (`string`, required), `transactions` (`Array<{ date, amount, payeeName?, payeeId?, categoryId?, notes?, cleared?, importedId? }>`, 1–50 items), `runRules?` (`boolean`, default `true`) |
-| `update_transaction` | `false` | Update an existing transaction by ID and return `{ previous, updated }` in **Decimal Amounts** so edits can be verified or immediately reverted. | `id` (`string`, required), `date?` (`YYYY-MM-DD`), `amount?` (`number`), `payeeId?` (`string \| null`), `categoryId?` (`string \| null`), `notes?` (`string \| null`), `cleared?` (`boolean`) |
-| `delete_transaction` | `true` | Delete an existing transaction by ID and return `{ deleted }` containing the full pre-deletion record in **Decimal Amounts** so it can be recreated if deleted by mistake. | `id` (`string`, required) |
-| `set_budget_amount` | `false` | Update a category's budgeted **Decimal Amount** and/or overspending `carryover` flag in a `YYYY-MM` **Budget Month** and return `{ previous, updated }` category states. | `month` (`YYYY-MM`, required), `categoryId` (`string`, required), `budgeted?` (`number`), `carryover?` (`boolean`) |
-
-</details>
-
-<details>
-<summary><strong>Category & Category Group Management</strong> (6 tools)</summary>
-
-| Tool | Destructive | Description | Parameters |
-| :--- | :---: | :--- | :--- |
-| `create_category` | `false` | Create a new envelope category under an existing category group. Returns `{ id }`. | `name` (`string`, min 1, required), `groupId` (`string`, min 1, required), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
-| `update_category` | `false` | Update an existing envelope category (rename, move to a different parent group, toggle income/hidden flags). | `id` (`string`, min 1, required), `name?` (`string`), `groupId?` (`string`), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
-| `delete_category` | `true` | Delete an existing envelope category. If the category has existing transactions, `transferCategoryId` must be provided to reassign them without orphaned records. | `id` (`string`, min 1, required), `transferCategoryId?` (`string`, min 1) |
-| `create_category_group` | `false` | Create a new category group to organize related expense or income envelopes. Returns `{ id }`. | `name` (`string`, min 1, required), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
-| `update_category_group` | `false` | Update an existing category group (rename or toggle income/hidden flags). | `id` (`string`, min 1, required), `name?` (`string`), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
-| `delete_category_group` | `true` | Delete an existing category group. If any member categories have transactions, `transferCategoryId` must be provided to safely reassign them. | `id` (`string`, min 1, required), `transferCategoryId?` (`string`, min 1) |
+| `create_transactions` | `false` | Create a batch of 1 to 50 transactions in an account using decimal amounts. Uses `importTransactions` by default (`runRules: true`) so payee matching and categorization rules run automatically, or `addTransactions` when `runRules: false`. | `accountId` (`string`, required), `transactions` (`Array<{ date, amount, payeeName?, payeeId?, categoryId?, notes?, cleared?, importedId? }>`, 1–50 items), `runRules?` (`boolean`, default `true`) |
+| `update_transaction` | `false` | Update an existing transaction by ID and return `{ previous, updated }` in decimal amounts so changes can be verified or reverted. | `id` (`string`, required), `date?` (`YYYY-MM-DD`), `amount?` (`number`), `payeeId?` (`string \| null`), `categoryId?` (`string \| null`), `notes?` (`string \| null`), `cleared?` (`boolean`) |
+| `delete_transaction` | `true` | Delete a transaction by ID and return `{ deleted }` with the full pre-deletion record in decimal amounts so it can be restored if deleted by mistake. | `id` (`string`, required) |
+| `set_budget_amount` | `false` | Update a category budgeted decimal amount or overspending carryover flag in a `YYYY-MM` budget month, returning `{ previous, updated }` states. | `month` (`YYYY-MM`, required), `categoryId` (`string`, required), `budgeted?` (`number`), `carryover?` (`boolean`) |
 
 </details>
 
 <details>
-<summary><strong>Payee Management & Merging</strong> (4 tools)</summary>
+<summary><strong>Categories and category groups (6 tools)</strong></summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
-| `create_payee` | `false` | Create a new payee record with a name string and return its generated ID `{ id }`. | `name` (`string`, min 1, required) |
+| `create_category` | `false` | Create an envelope category under a category group. Returns `{ id }`. | `name` (`string`, min 1, required), `groupId` (`string`, min 1, required), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
+| `update_category` | `false` | Update an envelope category name, parent group, or income and hidden flags. | `id` (`string`, min 1, required), `name?` (`string`), `groupId?` (`string`), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
+| `delete_category` | `true` | Delete an envelope category. When the category contains existing transactions, provide `transferCategoryId` to reassign them safely. | `id` (`string`, min 1, required), `transferCategoryId?` (`string`, min 1) |
+| `create_category_group` | `false` | Create a category group for organizing expense or income envelopes. Returns `{ id }`. | `name` (`string`, min 1, required), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
+| `update_category_group` | `false` | Update a category group name or income and hidden flags. | `id` (`string`, min 1, required), `name?` (`string`), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
+| `delete_category_group` | `true` | Delete a category group. When member categories contain transactions, provide `transferCategoryId` to reassign them safely. | `id` (`string`, min 1, required), `transferCategoryId?` (`string`, min 1) |
+
+</details>
+
+<details>
+<summary><strong>Payees and merging (4 tools)</strong></summary>
+
+| Tool | Destructive | Description | Parameters |
+| :--- | :---: | :--- | :--- |
+| `create_payee` | `false` | Create a payee record by name. Returns `{ id }`. | `name` (`string`, min 1, required) |
 | `update_payee` | `false` | Rename an existing payee record. | `id` (`string`, min 1, required), `name` (`string`, min 1, required) |
-| `delete_payee` | `true` | Delete an existing payee record. | `id` (`string`, min 1, required) |
-| `merge_payees` | `true` | Merge one or more duplicate source payees into a canonical target payee, consolidating all transactions and rules under the target payee and removing source records. | `targetPayeeId` (`string`, min 1, required), `sourcePayeeIds` (`string[]`, min 1 items, required) |
+| `delete_payee` | `true` | Delete a payee record by ID. | `id` (`string`, min 1, required) |
+| `merge_payees` | `true` | Merge duplicate source payees into a target payee, reassigning all transactions and rules to the target payee and removing the source payees. | `targetPayeeId` (`string`, min 1, required), `sourcePayeeIds` (`string[]`, min 1 items, required) |
 
 </details>
 
 <details>
-<summary><strong>Account Lifecycle Management</strong> (4 tools)</summary>
+<summary><strong>Account lifecycle (4 tools)</strong></summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
-| `create_account` | `false` | Create a new on-budget or off-budget account with a specified type and optional initial balance in **Decimal Amount**. Returns `{ id }`. | `name` (`string`, min 1, required), `type` (`'checking' \| 'savings' \| 'credit' \| 'investment' \| 'mortgage' \| 'debt' \| 'other'`, required), `offbudget?` (`boolean`), `initialBalance?` (`number`, finite Decimal Amount) |
-| `update_account` | `false` | Update an existing account name or toggle its off-budget status. | `id` (`string`, min 1, required), `name?` (`string`), `offbudget?` (`boolean`) |
-| `close_account` | `true` | Close an account in the Target Budget, optionally transferring remaining balance to another account and category. | `id` (`string`, min 1, required), `transferAccountId?` (`string`), `transferCategoryId?` (`string`) |
+| `create_account` | `false` | Create an on-budget or off-budget account with a specified type and optional initial balance. Returns `{ id }`. | `name` (`string`, min 1, required), `type` (`'checking' \| 'savings' \| 'credit' \| 'investment' \| 'mortgage' \| 'debt' \| 'other'`, required), `offbudget?` (`boolean`), `initialBalance?` (`number`, finite decimal amount) |
+| `update_account` | `false` | Update an account name or toggle its off-budget status. | `id` (`string`, min 1, required), `name?` (`string`), `offbudget?` (`boolean`) |
+| `close_account` | `true` | Close an account in the target budget, with optional balance and category transfer to another account. | `id` (`string`, min 1, required), `transferAccountId?` (`string`), `transferCategoryId?` (`string`) |
 | `reopen_account` | `false` | Reopen a previously closed account. | `id` (`string`, min 1, required) |
 
 </details>
 
 <details>
-<summary><strong>Bank Synchronization</strong> (1 tool)</summary>
+<summary><strong>Bank synchronization (1 tool)</strong></summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
-| `run_bank_sync` | `false` | Trigger bank synchronization for a specific linked account or all linked accounts when `accountId` is omitted. Returns structured reconciliation summary `{ updatedAccountIds, newTransactionsCount, matchedTransactionsCount, errors }`. | `accountId?` (`string`, min 1) |
+| `run_bank_sync` | `false` | Trigger bank synchronization for a single account or for all linked accounts when `accountId` is omitted. Returns `{ updatedAccountIds, newTransactionsCount, matchedTransactionsCount, errors }`. | `accountId?` (`string`, min 1) |
 
 </details>
 
 <details>
-<summary><strong>Budget Flow Adjustments</strong> (3 tools)</summary>
+<summary><strong>Budget flow adjustments (3 tools)</strong></summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
-| `set_budget_carryover` | `false` | Set the carryover flag for a category envelope in a specified budget month (`YYYY-MM`). When true, overspent category balance rolls over into the next month. | `month` (`YYYY-MM`, required), `categoryId` (`string`, min 1, required), `carryover` (`boolean`, required) |
-| `hold_budget_for_next_month` | `false` | Hold a specified **Decimal Amount** from the current month available budget for next month. | `month` (`YYYY-MM`, required), `amount` (`number`, finite Decimal Amount, required) |
-| `reset_budget_hold` | `false` | Reset the budget hold for a given month, releasing held budget hold funds back to the current month available budget. | `month` (`YYYY-MM`, required) |
+| `set_budget_carryover` | `false` | Set the overspending carryover flag for a category envelope in a budget month (`YYYY-MM`). When true, overspent category balance rolls into the next month. | `month` (`YYYY-MM`, required), `categoryId` (`string`, min 1, required), `carryover` (`boolean`, required) |
+| `hold_budget_for_next_month` | `false` | Hold a decimal amount from the current month available budget for the next month. | `month` (`YYYY-MM`, required), `amount` (`number`, finite decimal amount, required) |
+| `reset_budget_hold` | `false` | Reset the budget hold for a month and return held funds to the available budget. | `month` (`YYYY-MM`, required) |
 
 </details>
 
 <details>
-<summary><strong>Recurring Schedules Suite</strong> (3 tools)</summary>
+<summary><strong>Recurring schedules (3 tools)</strong></summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
-| `create_schedule` | `false` | Create a recurring schedule in the Target Budget with **Decimal Amounts**, recurrence configuration, and linked payee/account. | `name?` (`string`), `account` (`string`, required), `payee?` (`string`), `amount` (`number \| { num1, num2 }`, Decimal Amount, required), `amountOp?` (`'is' \| 'isapprox' \| 'isbetween'`), `date` (`string \| object`, required), `posts_transaction?` (`boolean`) |
-| `update_schedule` | `false` | Update fields on an existing recurring schedule (name, amount as Decimal Amount, amountOp, payee, account, date, posts_transaction, resetNextDate). | `id` (`string`, required), `name?` (`string`), `account?` (`string`), `payee?` (`string \| null`), `amount?` (`number \| { num1, num2 }`), `amountOp?` (`'is' \| 'isapprox' \| 'isbetween'`), `date?` (`string \| object`), `posts_transaction?` (`boolean`), `resetNextDate?` (`boolean`) |
-| `delete_schedule` | `true` | Permanently delete a recurring schedule from the Target Budget. | `id` (`string`, required) |
+| `create_schedule` | `false` | Create a recurring schedule in the target budget with decimal amounts, recurrence rules, and a linked payee and account. | `name?` (`string`), `account` (`string`, required), `payee?` (`string`), `amount` (`number \| { num1, num2 }`, decimal amount, required), `amountOp?` (`'is' \| 'isapprox' \| 'isbetween'`), `date` (`string \| object`, required), `posts_transaction?` (`boolean`) |
+| `update_schedule` | `false` | Update fields on an existing recurring schedule (name, amount, amountOp, payee, account, date, posts_transaction, resetNextDate). | `id` (`string`, required), `name?` (`string`), `account?` (`string`), `payee?` (`string \| null`), `amount?` (`number \| { num1, num2 }`), `amountOp?` (`'is' \| 'isapprox' \| 'isbetween'`), `date?` (`string \| object`), `posts_transaction?` (`boolean`), `resetNextDate?` (`boolean`) |
+| `delete_schedule` | `true` | Delete a recurring schedule from the target budget. | `id` (`string`, required) |
 
 </details>
 
 <details>
-<summary><strong>Automation Rules Suite</strong> (3 tools)</summary>
+<summary><strong>Automation rules (3 tools)</strong></summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
-| `create_rule` | `false` | Create a new automation rule for categorization, payee renaming, or field setting. Converts any monetary condition/action values from **Decimal Amounts** to Minor Units. | `stage?` (`'pre' \| 'post' \| 'default'`), `conditionsOp?` (`'and' \| 'or'`), `conditions` (`Array<{ field, op, value, options? }>`, min 1, required), `actions` (`Array<{ field?, op, value?, options? }>`, min 1, required) |
-| `update_rule` | `false` | Update conditions, actions, stage, or conditionsOp for an existing automation rule by ID. | `id` (`string`, required), `stage?` (`'pre' \| 'post' \| 'default'`), `conditionsOp?` (`'and' \| 'or'`), `conditions` (`Array<{ field, op, value, options? }>`, min 1, required), `actions` (`Array<{ field?, op, value?, options? }>`, min 1, required) |
-| `delete_rule` | `true` | Permanently delete an automation rule from the Target Budget. | `id` (`string`, required) |
+| `create_rule` | `false` | Create an automation rule for categorization, payee renaming, or field setting. Converts monetary condition and action values to minor units. | `stage?` (`'pre' \| 'post' \| 'default'`), `conditionsOp?` (`'and' \| 'or'`), `conditions` (`Array<{ field, op, value, options? }>`, min 1, required), `actions` (`Array<{ field?, op, value?, options? }>`, min 1, required) |
+| `update_rule` | `false` | Update conditions, actions, stage, or operator on an existing rule by ID. | `id` (`string`, required), `stage?` (`'pre' \| 'post' \| 'default'`), `conditionsOp?` (`'and' \| 'or'`), `conditions` (`Array<{ field, op, value, options? }>`, min 1, required), `actions` (`Array<{ field?, op, value?, options? }>`, min 1, required) |
+| `delete_rule` | `true` | Delete an automation rule from the target budget. | `id` (`string`, required) |
 
 </details>
 
 ---
 
-## Quick Start (One-Command Setup)
+## Quick start
 
-Deploy in seconds on your VPS without cloning the repository. In your terminal, run:
+To install on a VPS without cloning the repository, run the interactive setup wizard:
 
 ```bash
 mkdir -p actual-mcp && cd actual-mcp && bash -c "$(curl -fsSL https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/scripts/setup-wizard.sh)"
 ```
 
-The interactive wizard handles everything end-to-end:
-1. **Auto-Downloads `docker-compose.yml`**: Fetches the compose file and creates the persistent `data/` directory.
-2. **Configures `.env`**: Sets up `PUBLIC_URL` (for your Cloudflare Tunnel) and loopback `PORT` (default `3000`).
-3. **OAuth Admin Passphrase**: Prompts for `OAUTH_ADMIN_PASSWORD` (Admin Consent Passphrase).
-4. **Target AI Clients Multiselect**: Select which AI clients you plan to connect (Google Gemini, Claude, Cursor, ChatGPT, etc.) and automatically configures exact return URLs.
-5. **Actual Budget Connection**: Prompts for `ACTUAL_SERVER_URL`, server password, and `ACTUAL_SYNC_ID`.
-6. **Starts Docker Container**: Offers to pull the pre-built image from GHCR and start it (`docker compose pull && docker compose up -d`).
-7. **Healthchecks**: Tests local and public `/healthz` endpoints.
-8. **Connect AI Client(s)**: Displays tailored connection instructions for each selected AI client.
+The setup wizard automates configuration:
+1. Downloads `docker-compose.yml` and creates the persistent `data/` directory.
+2. Configures `.env` with `PUBLIC_URL` and the loopback `PORT` (default `3000`).
+3. Prompts for `OAUTH_ADMIN_PASSWORD` to protect the authorization consent screen.
+4. Sets up OAuth redirect URIs for your selected AI clients, including Claude Desktop, Cursor, Google Gemini, and ChatGPT.
+5. Configures the connection to your Actual Budget sync server: `ACTUAL_SERVER_URL`, server password, and `ACTUAL_SYNC_ID`.
+6. Pulls the container image from GitHub Container Registry and starts the service.
+7. Verifies health against local and public `/healthz` endpoints.
+8. Displays tailored connection instructions for each selected AI client.
 
 ---
 
-## Environment Variables
+## Environment variables
 
-Copy `.env.example` to `.env` (or run `./scripts/setup-wizard.sh`):
+To configure environment variables manually, copy `.env.example` to `.env`. Alternatively, run `./scripts/setup-wizard.sh`.
 
 | Variable | Required | Default | Description |
 | :--- | :---: | :--- | :--- |
-| `PUBLIC_URL` | **Yes** | — | Public HTTPS origin exposed by your Cloudflare Tunnel (e.g. `https://actual-mcp.example.com`, no trailing slash). |
-| `PORT` | No | `3000` | Port the HTTP server listens on inside the container (and host loopback port in `docker-compose.yml`). |
-| `ACTUAL_MCP_VERSION` | No | `latest` | Tag of the pre-built Docker image from GitHub Container Registry (`ghcr.io/pedroliu1999/actual-mcp`). |
-| `DATA_DIR` | **Yes** | `/data` | Path to the persistent directory storing `oauth-tokens.json` (**Token Store**) and `budget-cache/` (**Budget Cache**). |
-| `OAUTH_ADMIN_PASSWORD` | **Yes** | — | Admin passphrase required on the HTML consent page (`GET /authorize`) to approve an OAuth grant. |
-| `OAUTH_ALLOWED_REDIRECT_URIS` | No | `http://localhost,http://127.0.0.1` | Comma-separated list of allowed OAuth redirect URIs. Loopback ports match automatically per RFC 8252. |
-| `ACTUAL_SERVER_URL` | **Yes** | — | URL of your self-hosted Actual Budget **Sync Server** (e.g. `http://host.docker.internal:5006`). |
-| `ACTUAL_PASSWORD` | **Yes** | — | Server password used to sign in to your Actual Budget **Sync Server**. |
-| `ACTUAL_SYNC_ID` | **Yes** | — | **Sync ID** UUID of the **Target Budget** (found in Actual Budget under *Settings → Show advanced settings → Sync ID*). |
-| `ACTUAL_ENCRYPTION_PASSWORD` | No | — | End-to-end encryption password for the **Target Budget** (omit or leave empty if unencrypted). |
-| `SYNC_TTL_SECONDS` | No | `30` | **Coalesced Sync** freshness window in seconds for read tools. |
+| `PUBLIC_URL` | Yes | - | Public HTTPS origin exposed by your Cloudflare Tunnel (for example, `https://actual-mcp.example.com`, without trailing slash). |
+| `PORT` | No | `3000` | Port that the HTTP server listens on inside the container, mapped to host loopback in `docker-compose.yml`. |
+| `ACTUAL_MCP_VERSION` | No | `latest` | Image tag from GitHub Container Registry (`ghcr.io/pedroliu1999/actual-mcp`). |
+| `DATA_DIR` | Yes | `/data` | Path to the persistent directory storing `oauth-tokens.json` (token store) and `budget-cache/` (budget cache). |
+| `OAUTH_ADMIN_PASSWORD` | Yes | - | Admin passphrase required on the HTML consent page (`GET /authorize`) to approve an OAuth grant. |
+| `OAUTH_ALLOWED_REDIRECT_URIS` | No | `http://localhost,http://127.0.0.1` | Comma-separated list of allowed OAuth redirect URIs. Loopback ports match dynamically per RFC 8252. Default includes well-known Google callback endpoints. |
+| `ACTUAL_SERVER_URL` | Yes | - | URL of your self-hosted Actual Budget sync server (for example, `http://host.docker.internal:5006`). |
+| `ACTUAL_PASSWORD` | Yes | - | Password used to authenticate with your Actual Budget sync server. |
+| `ACTUAL_SYNC_ID` | Yes | - | Sync ID of the target budget. Find this in Actual Budget under *Settings → Show advanced settings → Sync ID*. |
+| `ACTUAL_ENCRYPTION_PASSWORD` | No | - | End-to-end encryption password for the target budget. Leave empty if unencrypted. |
+| `SYNC_TTL_SECONDS` | No | `30` | Coalesced sync freshness window in seconds for read tools. |
 
 ---
 
-## VPS Deployment Guide
+## VPS deployment guide
 
 This guide assumes your VPS already runs:
-1. An Actual Budget **Sync Server** (`actual-server`, typically listening on port `5006`).
+1. An Actual Budget sync server (`actual-server`, typically on port `5006`).
 2. A Cloudflare Tunnel (`cloudflared`).
 
-### Step 1: Clone & Configure `.env`
+### Step 1: Clone and configure the environment
+
+To clone the repository and prepare the persistent storage directory, run:
 
 ```bash
 git clone git@github.com:PedroLiu1999/actual-mcp.git
@@ -203,42 +205,43 @@ cd actual-mcp
 mkdir -p data
 ```
 
-You can configure `.env` interactively using the setup wizard:
+To configure `.env` interactively, run:
 
 ```bash
 ./scripts/setup-wizard.sh
 ```
 
-Or configure it manually by copying `.env.example`:
+To configure `.env` manually, copy the sample file and fill in the values:
 
 ```bash
 cp .env.example .env
 ```
 
-Set `OAUTH_ADMIN_PASSWORD` to a strong passphrase, and fill in your `.env`:
+Set `OAUTH_ADMIN_PASSWORD` to a strong passphrase, then set the remaining variables:
 
-- Set `PUBLIC_URL=https://actual-mcp.yourdomain.com` (matching the hostname you will route in `cloudflared`).
+- Set `PUBLIC_URL=https://actual-mcp.yourdomain.com`, matching the public hostname routed by `cloudflared`.
 - Set `ACTUAL_SERVER_URL`:
-  - If `actual-server` publishes port `5006` on the VPS host (e.g. `127.0.0.1:5006:5006` or `0.0.0.0:5006:5006`), keep `ACTUAL_SERVER_URL=http://host.docker.internal:5006` (`docker-compose.yml` maps `host.docker.internal` to the Docker host gateway automatically).
-  - If `actual-server` uses a self-signed certificate over HTTPS, either connect over local HTTP via `host.docker.internal` or mount the CA certificate and set `NODE_EXTRA_CA_CERTS`.
-- Set `ACTUAL_PASSWORD` to your Actual server password and `ACTUAL_SYNC_ID` to your budget's **Sync ID** (*Settings → Show advanced settings → Sync ID* in the Actual UI).
+  - When `actual-server` publishes port `5006` on the VPS host (for example, `127.0.0.1:5006:5006`), set `ACTUAL_SERVER_URL=http://host.docker.internal:5006`. `docker-compose.yml` maps `host.docker.internal` to the Docker host gateway automatically.
+  - When `actual-server` uses HTTPS with a self-signed certificate, connect over local HTTP through `host.docker.internal`, or mount the CA certificate and set `NODE_EXTRA_CA_CERTS`.
+- Set `ACTUAL_PASSWORD` to your Actual server password.
+- Set `ACTUAL_SYNC_ID` to your budget sync ID (*Settings → Show advanced settings → Sync ID* in Actual Budget).
 
-### Step 2: Start the Container
+### Step 2: Start the container
 
-To run using the official prebuilt image from GitHub Container Registry:
+To run using the official image from GitHub Container Registry:
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-Or build locally from source:
+To build and run locally from source:
 
 ```bash
 docker compose up -d --build
 ```
 
-Verify the container is healthy and the **Target Budget** initialized cleanly:
+To verify that the service is running and the target budget initialized cleanly:
 
 ```bash
 curl -s http://127.0.0.1:3000/healthz | jq .
@@ -257,22 +260,24 @@ Expected response:
 }
 ```
 
-### Step 3: Route a Public Hostname in Your Existing `cloudflared` Tunnel
+### Step 3: Route a public hostname through Cloudflare Tunnel
 
-Because `docker-compose.yml` binds `127.0.0.1:${PORT:-3000}:3000` on the VPS host, `actual-mcp` is never exposed directly on your VPS's public IP—only through your Cloudflare Tunnel.
+Because `docker-compose.yml` binds to `127.0.0.1:${PORT:-3000}:3000` on the VPS host, `actual-mcp` is never exposed directly on the public IP address of your VPS. Traffic routes only through your Cloudflare Tunnel.
 
-#### Option A: Cloudflare Zero Trust Dashboard (Remotely Managed Tunnel)
+#### Option A: Cloudflare Zero Trust dashboard
+
 1. Open the **Cloudflare Zero Trust Dashboard** → **Networks** → **Tunnels**.
-2. Select your existing tunnel and click **Configure** → **Public Hostname** → **Add a public hostname**.
-3. Set:
+2. Select your tunnel and choose **Configure** → **Public Hostname** → **Add a public hostname**.
+3. Set the hostname fields:
    - **Subdomain**: `actual-mcp` (or your chosen subdomain)
    - **Domain**: `yourdomain.com`
    - **Service Type**: `HTTP`
-   - **URL**: `127.0.0.1:3000` (or `host.docker.internal:3000` if `cloudflared` runs inside a Docker container with `host-gateway` mapped)
+   - **URL**: `127.0.0.1:3000` (or `host.docker.internal:3000` if `cloudflared` runs inside Docker with host gateway mapping)
 4. Save the hostname.
 
-#### Option B: Local `cloudflared` Config File (`/etc/cloudflared/config.yml`)
-Add an ingress rule before the catch-all `http_status:404` rule:
+#### Option B: Local cloudflared configuration file
+
+Add an ingress rule to `/etc/cloudflared/config.yml` before the catch-all `http_status:404` rule:
 
 ```yaml
 ingress:
@@ -282,16 +287,16 @@ ingress:
   - service: http_status:404
 ```
 
-Then create the DNS route and reload `cloudflared`:
+Create the DNS route and reload `cloudflared`:
 
 ```bash
 cloudflared tunnel route dns <your-tunnel-name> actual-mcp.yourdomain.com
 sudo systemctl restart cloudflared
 ```
 
-> **Cloudflare WAF / Bot Fight Mode Note**: Google Gemini sends outbound MCP requests with `User-Agent: Google`. Ensure Cloudflare **Bot Fight Mode** or custom WAF rules on `actual-mcp.yourdomain.com` do not challenge (CAPTCHA / JS challenge) requests to `/mcp`, `/authorize`, `/token`, `/revoke`, or `/.well-known/*`.
+> **Cloudflare WAF and Bot Fight Mode**: Google Gemini sends outbound MCP requests with `User-Agent: Google`. Ensure Cloudflare Bot Fight Mode or custom WAF rules on `actual-mcp.yourdomain.com` do not challenge (CAPTCHA or JavaScript challenges) requests to `/mcp`, `/authorize`, `/token`, `/revoke`, `/register`, or `/.well-known/*`.
 
-Verify external OAuth discovery over HTTPS:
+To verify external OAuth discovery over HTTPS:
 
 ```bash
 curl -s https://actual-mcp.yourdomain.com/.well-known/oauth-protected-resource | jq .
@@ -300,23 +305,23 @@ curl -s https://actual-mcp.yourdomain.com/.well-known/oauth-authorization-server
 
 ---
 
-## Connecting in AI Assistants (Claude Desktop, Cursor, Gemini)
+## Connect AI assistants
 
-Once `https://actual-mcp.yourdomain.com` is live behind your Cloudflare Tunnel:
+Once `https://actual-mcp.yourdomain.com` is accessible through your Cloudflare Tunnel:
 
-1. In your AI client (e.g. Claude Desktop, Cursor, or Gemini), add the MCP server URL:
+1. Add the MCP server URL in your AI client (such as Claude Desktop, Cursor, or Google Gemini):
    - **MCP server URL**: `https://actual-mcp.yourdomain.com/mcp`
-2. **Zero Credentials Required**: Because `actual-mcp` implements OAuth 2.1 Public Client with PKCE, you do not need to configure or copy-paste any `Client ID` or `Client Secret`.
-3. **Approval**:
-   - The client discovers OAuth metadata and opens a browser window to `https://actual-mcp.yourdomain.com/authorize`.
-   - On the **Authorize Actual Budget MCP** consent screen, enter your `OAUTH_ADMIN_PASSWORD` and click **Approve Access**.
-4. The client exchanges the authorization code with PKCE (`S256`) and receives persistent tokens. Your Actual Budget tools are now ready to use!
+2. **Client registration**: Clients that support RFC 7591 Dynamic Client Registration (such as Google Gemini) register automatically. Clients connecting directly as public OAuth 2.1 PKCE clients do not require a pre-shared client ID or client secret.
+3. **Authorization**:
+   - The client discovers OAuth metadata and opens `https://actual-mcp.yourdomain.com/authorize` in your browser.
+   - On the consent screen, enter your `OAUTH_ADMIN_PASSWORD` and select **Approve Access**.
+4. The client completes the PKCE token exchange and receives an access token. Your AI client can now invoke Actual Budget tools.
 
 ---
 
-## Local Development & Verification
+## Local development and verification
 
-Requires **Node.js `>=22.0.0`**.
+Development requires Node.js 22.0.0 or later.
 
 ```bash
 # Install dependencies
@@ -332,18 +337,17 @@ npm run typecheck
 npm run build
 ```
 
-### Continuous Integration (CI)
+### Continuous integration
 
 Automated GitHub Actions workflows run on every pull request and push to `main`:
-- **CI Pipeline** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): Runs dependency installation (`npm ci`), TypeScript typecheck (`npm run typecheck`), full Vitest test suite (`npm test`), and production compilation (`npm run build`) across supported Node.js versions (`22.x`, `24.x`).
-- **Container Build & Publish** ([`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml)): Builds and pushes multi-architecture (`linux/amd64`, `linux/arm64`) Docker container images to GitHub Container Registry.
+- The CI pipeline ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs dependency installation (`npm ci`), TypeScript typecheck (`npm run typecheck`), the full Vitest test suite (`npm test`), and compilation (`npm run build`) on Node.js versions 22.x and 24.x.
+- The container publishing pipeline ([`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml)) builds and pushes multi-architecture (`linux/amd64`, `linux/arm64`) container images to GitHub Container Registry.
 
 ---
 
-## Brand & Logo Assets
+## Brand and logo assets
 
-The official `actual-mcp` brand identity ("The Agent Spark") is available in [`docs/assets/logo/`](docs/assets/logo/):
-- **Brand Guidelines**: [`docs/assets/logo/BRAND-GUIDELINES.md`](docs/assets/logo/BRAND-GUIDELINES.md)
-- **Vector & Raster Distribution**: [`docs/assets/logo/dist/`](docs/assets/logo/dist/) (SVG masters, PNG ladders, PWA icons, favicon.ico)
-- **Interactive Presentation Board**: [`docs/assets/logo/presentation.html`](docs/assets/logo/presentation.html)
-
+The official `actual-mcp` brand identity ("The Agent Spark") is located in [`docs/assets/logo/`](docs/assets/logo/):
+- **Brand guidelines**: [`docs/assets/logo/BRAND-GUIDELINES.md`](docs/assets/logo/BRAND-GUIDELINES.md)
+- **Vector and raster assets**: [`docs/assets/logo/dist/`](docs/assets/logo/dist/) (SVG masters, PNG ladders, PWA icons, favicon.ico)
+- **Interactive presentation board**: [`docs/assets/logo/presentation.html`](docs/assets/logo/presentation.html)

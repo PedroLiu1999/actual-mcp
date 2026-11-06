@@ -67,7 +67,7 @@
     <div class="diagram-container">
       <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="actual-mcp-arch-title actual-mcp-arch-desc">
         <title id="actual-mcp-arch-title">actual-mcp System Architecture</title>
-        <desc id="actual-mcp-arch-desc">Topology showing Google Gemini connecting via Cloudflare Tunnel to the actual-mcp container, embedded OAuth server, stateless MCP transport, local SQLite budget cache, and self-hosted Actual Budget server.</desc>
+        <desc id="actual-mcp-arch-desc">Topology showing AI assistants (Claude, Cursor, Gemini) connecting via Cloudflare Tunnel to the actual-mcp container, embedded OAuth server, Streamable HTTP MCP transport, local SQLite budget cache, and self-hosted Actual Budget server.</desc>
         <defs>
           <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
           <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bf4520"/></marker>
@@ -137,13 +137,13 @@
         <text x="728" y="335" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">PORT 5006</text>
 
         <!-- Nodes -->
-        <!-- Node 1: Google Gemini (External Client) -->
+        <!-- Node 1: AI Assistants (External Clients) -->
         <rect x="48" y="204" width="136" height="72" rx="6" fill="#f5f5f5"/>
         <rect x="48" y="204" width="136" height="72" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
-        <rect x="56" y="212" width="32" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.25)" stroke-width="0.8"/>
-        <text x="72" y="221" fill="#5a6580" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLIENT</text>
-        <text x="116" y="240" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Google Gemini</text>
-        <text x="116" y="258" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">Custom MCP Connector</text>
+        <rect x="52" y="212" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.25)" stroke-width="0.8"/>
+        <text x="72" y="221" fill="#5a6580" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLIENTS</text>
+        <text x="116" y="240" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">AI Assistants</text>
+        <text x="116" y="258" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">Claude · Cursor · Gemini</text>
 
         <!-- Node 2: Cloudflare Tunnel (Ingress) -->
         <rect x="224" y="204" width="128" height="72" rx="6" fill="#f5f5f5"/>
@@ -159,7 +159,7 @@
         <rect x="440" y="112" width="32" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
         <text x="456" y="121" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">AUTH</text>
         <text x="560" y="134" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Embedded OAuth 2.1 Server</text>
-        <text x="560" y="152" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">PKCE · Consent Screen · Token Store</text>
+        <text x="560" y="152" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">RFC 7591 DCR · PKCE · Token Store</text>
 
         <!-- Node 4: Stateless MCP Transport (FOCAL ACCENT) -->
         <rect x="432" y="208" width="256" height="64" rx="6" fill="#f5f5f5"/>
@@ -167,7 +167,7 @@
         <rect x="440" y="216" width="28" height="12" rx="2" fill="transparent" stroke="rgba(191,69,32,0.50)" stroke-width="0.8"/>
         <text x="454" y="225" fill="#bf4520" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">MCP</text>
         <text x="560" y="238" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Streamable HTTP Transport</text>
-        <text x="560" y="256" fill="#bf4520" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">30 Tools · Decimal Conversion · /mcp</text>
+        <text x="560" y="256" fill="#bf4520" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">39 Tools · Decimal Conversion · /mcp</text>
 
         <!-- Node 5: ActualBudgetGateway -->
         <rect x="432" y="312" width="256" height="64" rx="6" fill="#f5f5f5"/>
@@ -183,7 +183,7 @@
         <rect x="440" y="424" width="36" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
         <text x="458" y="433" fill="#4f5d75" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STORE</text>
         <text x="560" y="446" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">SQLite Budget Cache</text>
-        <text x="560" y="464" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">better-sqlite3 · /data/budget-cache</text>
+        <text x="560" y="464" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">@actual-app/api · /data/budget-cache</text>
 
         <!-- Node 7: Actual Budget Sync Server (Upstream) -->
         <rect x="768" y="312" width="152" height="64" rx="6" fill="#f5f5f5"/>

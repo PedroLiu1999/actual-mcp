@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import request from 'supertest';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig, type AppConfig } from '../src/config.js';
 import type { BudgetGateway } from '../src/gateway/types.js';
@@ -944,6 +944,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     const registerFormRes = await request(appRestarted)
       .post('/register')
       .set('Host', 'mcp.example.com')
+      .set('X-Forwarded-For', '198.51.100.6')
       .type('form')
       .send({
         client_name: 'Form-encoded Client',
@@ -958,6 +959,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     const registerGoogleRealPayloadRes = await request(appRestarted)
       .post('/register')
       .set('Host', 'mcp.example.com')
+      .set('X-Forwarded-For', '198.51.100.7')
       .set('User-Agent', 'OpenAuth')
       .set('Content-Type', 'application/json')
       .send({
@@ -983,6 +985,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     const registerDedicatedRes = await request(appRestarted)
       .post('/register')
       .set('Host', 'mcp.example.com')
+      .set('X-Forwarded-For', '198.51.100.8')
       .set('Content-Type', 'application/json')
       .send({
         client_name: 'Client Dedicated',
@@ -1034,5 +1037,153 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
         passphrase: 'correct-horse-battery-staple',
       });
     expect(authTraversalAttemptRes.status).toBe(400);
+  });
+
+  describe('Dynamic Client Registration Hardening (Rate Limiting, Cap, Sanitized Logs)', () => {
+    it('enforces IP rate limiting on POST /register (5 requests per 15 minutes per IP) with HTTP 429 and standard headers', async () => {
+      const app = createApp({ config, budgetGateway: createStubGateway() });
+      const clientIp = '203.0.113.10';
+
+      for (let i = 1; i <= 5; i++) {
+        const res = await request(app)
+          .post('/register')
+          .set('Host', 'mcp.example.com')
+          .set('X-Forwarded-For', clientIp)
+          .set('Content-Type', 'application/json')
+          .send({
+            client_name: `Client ${i}`,
+            redirect_uris: [`http://localhost:54321/cb-${i}`],
+            token_endpoint_auth_method: 'none',
+          });
+        expect(res.status).toBe(201);
+      }
+
+      // 6th request from same IP must be rate limited
+      const rateLimitedRes = await request(app)
+        .post('/register')
+        .set('Host', 'mcp.example.com')
+        .set('X-Forwarded-For', clientIp)
+        .set('Content-Type', 'application/json')
+        .send({
+          client_name: 'Client 6 (Over limit)',
+          redirect_uris: ['http://localhost:54321/cb-6'],
+          token_endpoint_auth_method: 'none',
+        });
+
+      expect(rateLimitedRes.status).toBe(429);
+      expect(rateLimitedRes.headers['ratelimit-limit']).toBe('5');
+      expect(rateLimitedRes.headers['ratelimit-remaining']).toBe('0');
+      expect(rateLimitedRes.headers['ratelimit-reset']).toBeDefined();
+
+      // Request from a different IP under the limit must succeed
+      const differentIpRes = await request(app)
+        .post('/register')
+        .set('Host', 'mcp.example.com')
+        .set('X-Forwarded-For', '203.0.113.11')
+        .set('Content-Type', 'application/json')
+        .send({
+          client_name: 'Client Other IP',
+          redirect_uris: ['http://localhost:54321/cb-other'],
+          token_endpoint_auth_method: 'none',
+        });
+
+      expect(differentIpRes.status).toBe(201);
+      expect(differentIpRes.headers['ratelimit-remaining']).toBe('4');
+    });
+
+    it('enforces maximum ceiling of 20 registered clients and rejects subsequent registrations with RFC-compliant error without modifying storage', async () => {
+      // Prepopulate token store with 20 clients
+      const existingClients = Array.from({ length: 20 }, (_, i) => ({
+        client_id: `client-seed-${i + 1}`,
+        client_name: `Seed Client ${i + 1}`,
+        redirect_uris: [`http://localhost:54321/cb-${i + 1}`],
+        token_endpoint_auth_method: 'none',
+      }));
+
+      const tokenStorePath = path.join(tempDataDir, 'oauth-tokens.json');
+      fs.writeFileSync(
+        tokenStorePath,
+        JSON.stringify({ accessTokens: [], refreshTokens: [], clients: existingClients }, null, 2),
+        'utf8',
+      );
+
+      const app = createApp({ config, budgetGateway: createStubGateway() });
+
+      // Attempt to dynamically register the 21st client
+      const rejectRes = await request(app)
+        .post('/register')
+        .set('Host', 'mcp.example.com')
+        .set('X-Forwarded-For', '203.0.113.20')
+        .set('Content-Type', 'application/json')
+        .send({
+          client_name: 'Overflow Client 21',
+          redirect_uris: ['http://localhost:54321/cb-21'],
+          token_endpoint_auth_method: 'none',
+        });
+
+      expect(rejectRes.status).toBe(400);
+      expect(rejectRes.body.error).toBe('invalid_client_metadata');
+      expect(rejectRes.body.error_description).toContain('Client registration limit reached');
+
+      // Verify disk storage is untouched and still contains exactly 20 clients
+      const diskData = JSON.parse(fs.readFileSync(tokenStorePath, 'utf8'));
+      expect(diskData.clients).toHaveLength(20);
+      expect(diskData.clients.some((c: { client_name: string }) => c.client_name === 'Overflow Client 21')).toBe(false);
+    });
+
+    it('logs only sanitized metadata on POST /register without echoing arbitrary request payload bodies or secrets', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      try {
+        const app = createApp({ config, budgetGateway: createStubGateway() });
+
+        const secretPayload = 'SUPER_SECRET_LEAK_TARGET_12345';
+        const arbitraryPayload = 'ARBITRARY_UNVALIDATED_ATTACK_STRING_67890';
+
+        const res = await request(app)
+          .post('/register')
+          .set('Host', 'mcp.example.com')
+          .set('X-Forwarded-For', '203.0.113.30')
+          .set('Content-Type', 'application/json')
+          .send({
+            client_name: 'Sanitization Verification Client',
+            redirect_uris: ['http://localhost:54321/audit-callback'],
+            token_endpoint_auth_method: 'client_secret_post',
+            sensitive_field: secretPayload,
+            arbitrary_field: arbitraryPayload,
+          });
+
+        expect(res.status).toBe(201);
+        expect(res.body.client_secret).toBeDefined();
+
+        const allLogs = logSpy.mock.calls
+          .map((call) => call.map((arg) => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' '))
+          .join('\n');
+
+        // Must not leak the arbitrary extra fields
+        expect(allLogs).not.toContain(secretPayload);
+        expect(allLogs).not.toContain(arbitraryPayload);
+
+        // Must not log the generated client_secret
+        expect(allLogs).not.toContain(res.body.client_secret);
+
+        // Incoming log must contain sanitized metadata structure
+        const incomingCall = logSpy.mock.calls.find((call) =>
+          String(call[0]).includes('[register] 📥 incoming registration request'),
+        );
+        expect(incomingCall).toBeDefined();
+        const incomingArg = incomingCall![1] as Record<string, unknown>;
+        expect(incomingArg).toBeDefined();
+        expect(incomingArg.metadata).toEqual({
+          client_id: undefined,
+          client_name: 'Sanitization Verification Client',
+          token_endpoint_auth_method: 'client_secret_post',
+          redirect_uris_count: 1,
+        });
+        expect(incomingArg.body).toBeUndefined();
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
   });
 });

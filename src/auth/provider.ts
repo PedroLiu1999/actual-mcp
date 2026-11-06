@@ -20,6 +20,7 @@ import type { AppConfig } from '../config.js';
 import {
   ACCESS_TOKEN_TTL_SECONDS,
   FileTokenStore,
+  MAX_REGISTERED_CLIENTS,
   REFRESH_TOKEN_TTL_SECONDS,
 } from './tokenStore.js';
 
@@ -207,6 +208,10 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
           client_id_issued_at?: number;
         },
       ) => {
+        if (this.tokenStore.getClientCount() >= MAX_REGISTERED_CLIENTS) {
+          throw new InvalidClientMetadataError('Client registration limit reached');
+        }
+
         const supportedAuthMethods = new Set<string>(SUPPORTED_TOKEN_ENDPOINT_AUTH_METHODS);
         if (
           client.token_endpoint_auth_method !== undefined &&

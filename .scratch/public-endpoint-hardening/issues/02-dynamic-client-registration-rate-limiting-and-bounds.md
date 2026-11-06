@@ -4,11 +4,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `POST /register` enforces IP rate limiting (5 requests per 15 minutes per IP), returning HTTP 429 Too Many Requests with standard rate limit headers when exceeded.
-- [ ] The persistent token store enforces a maximum ceiling of 20 registered clients.
-- [ ] Attempting to dynamically register a client when the store is at maximum capacity returns an RFC-compliant client registration rejection without modifying disk storage or crashing.
-- [ ] Registration logging records only sanitized metadata (client ID, auth method, redirect URI count) without logging arbitrary unvalidated payload bodies.
-- [ ] Valid registration requests under the limit continue to succeed with HTTP 201 Created.
-- [ ] Integration tests at the HTTP application seam verify the rate limit threshold, client cap enforcement, and successful registration flows.
+- [x] `POST /register` enforces IP rate limiting (5 requests per 15 minutes per IP), returning HTTP 429 Too Many Requests with standard rate limit headers when exceeded.
+- [x] The persistent token store enforces a maximum ceiling of 20 registered clients.
+- [x] Attempting to dynamically register a client when the store is at maximum capacity returns an RFC-compliant client registration rejection without modifying disk storage or crashing.
+- [x] Registration logging records only sanitized metadata (client ID, auth method, redirect URI count) without logging arbitrary unvalidated payload bodies.
+- [x] Valid registration requests under the limit continue to succeed with HTTP 201 Created.
+- [x] Integration tests at the HTTP application seam verify the rate limit threshold, client cap enforcement, and successful registration flows.

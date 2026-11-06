@@ -129,6 +129,15 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
 
   app.post('/authorize', authorizePostLimiter);
 
+  const registerPostLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  app.post('/register', registerPostLimiter);
+
   app.use('/authorize', express.urlencoded({ extended: false }), (req, _res, next) => {
     if (req.method === 'POST') {
       req.body = {
@@ -191,9 +200,18 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
             JSON.stringify(body),
           );
         } else {
+          const respObj = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+          const sanitizedResp = {
+            client_id: respObj.client_id,
+            client_name: respObj.client_name,
+            token_endpoint_auth_method: respObj.token_endpoint_auth_method,
+            redirect_uris_count: Array.isArray(respObj.redirect_uris)
+              ? respObj.redirect_uris.length
+              : undefined,
+          };
           console.log(
             `[register] ✅ ${res.statusCode} client registered:`,
-            JSON.stringify(body),
+            JSON.stringify(sanitizedResp),
           );
         }
         return originalJson(body);
@@ -202,10 +220,29 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
       if (req.method === 'POST') {
         req.body = normalizeRegistrationBody(req.body);
 
+        const redirectUris = Array.isArray(req.body?.redirect_uris)
+          ? req.body.redirect_uris
+          : typeof req.body?.redirect_uris === 'string'
+            ? [req.body.redirect_uris]
+            : typeof req.body?.redirect_uri === 'string'
+              ? [req.body.redirect_uri]
+              : [];
+
+        const sanitizedMeta = {
+          client_id: typeof req.body?.client_id === 'string' ? req.body.client_id : undefined,
+          client_name:
+            typeof req.body?.client_name === 'string' ? req.body.client_name : undefined,
+          token_endpoint_auth_method:
+            typeof req.body?.token_endpoint_auth_method === 'string'
+              ? req.body.token_endpoint_auth_method
+              : undefined,
+          redirect_uris_count: redirectUris.length,
+        };
+
         console.log(`[register] 📥 incoming registration request:`, {
           contentType: req.headers['content-type'],
           userAgent: req.headers['user-agent'],
-          body: req.body,
+          metadata: sanitizedMeta,
         });
 
         for (const uri of extractCandidateRedirectUris(req.body)) {
@@ -223,6 +260,9 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
       resourceServerUrl,
       scopesSupported,
       resourceName: 'Actual Budget MCP Server',
+      clientRegistrationOptions: {
+        rateLimit: false,
+      },
     }),
   );
 

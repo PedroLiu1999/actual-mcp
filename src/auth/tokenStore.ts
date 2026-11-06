@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { InvalidClientMetadataError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import type { OAuthClientInformationFull } from '@modelcontextprotocol/sdk/shared/auth.js';
 
 export interface StoredToken {
@@ -22,6 +23,7 @@ interface TokenStoreData {
 
 export const ACCESS_TOKEN_TTL_SECONDS = 3600;
 export const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
+export const MAX_REGISTERED_CLIENTS = 20;
 
 function hydrateTokens(
   items: unknown,
@@ -133,7 +135,14 @@ export class FileTokenStore {
     fs.renameSync(tempPath, this.filePath);
   }
 
+  getClientCount(): number {
+    return this.clients.size;
+  }
+
   saveClient(client: OAuthClientInformationFull): void {
+    if (!this.clients.has(client.client_id) && this.clients.size >= MAX_REGISTERED_CLIENTS) {
+      throw new InvalidClientMetadataError('Client registration limit reached');
+    }
     this.clients.set(client.client_id, client);
     this.persistToDisk();
   }

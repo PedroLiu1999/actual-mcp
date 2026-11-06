@@ -368,7 +368,7 @@ say "The wizard will configure the exact OAuth redirect return URLs needed for e
 printf '\n'
 say "Available AI client presets:"
 say "  1) Google Gemini (Web Connected Apps, Developer Mode, Vertex AI)"
-say "  2) Claude (Claude Desktop, Claude Code)"
+say "  2) Claude (Claude Desktop, Claude Code, Claude Web)"
 say "  3) Cursor (Cursor IDE)"
 say "  4) ChatGPT / OpenAI (Custom GPTs / Actions)"
 say "  5) Custom / Other MCP Client"
@@ -389,18 +389,28 @@ if [[ -n "$CURRENT_AGENTS" ]]; then
 elif [[ -n "$(_existing 'OAUTH_ALLOWED_REDIRECT_URIS' || true)" ]]; then
   EXISTING_REDIRECTS=$(_existing "OAUTH_ALLOWED_REDIRECT_URIS" || true)
   DEFAULT_NUMS=()
-  if [[ "$EXISTING_REDIRECTS" == *"googleusercontent"* || "$EXISTING_REDIRECTS" == *"vertexaisearch"* ]]; then
-    DEFAULT_NUMS+=("1")
-  fi
-  if [[ "$EXISTING_REDIRECTS" == *"localhost"* || "$EXISTING_REDIRECTS" == *"127.0.0.1"* ]]; then
-    DEFAULT_NUMS+=("2" "3")
-    # If upgrading from a loopback-only configuration, suggest Google Gemini as well
-    if [[ "$EXISTING_REDIRECTS" != *"googleusercontent"* && "$EXISTING_REDIRECTS" != *"vertexaisearch"* ]]; then
-      DEFAULT_NUMS=("1" "${DEFAULT_NUMS[@]}")
+  is_loopback_only=1
+  IFS=',' read -ra existing_parts <<< "$EXISTING_REDIRECTS"
+  for part in "${existing_parts[@]}"; do
+    clean_part=$(printf '%s' "$part" | tr -d ' ')
+    if [[ "$clean_part" != "http://localhost"* && "$clean_part" != "http://127.0.0.1"* && -n "$clean_part" ]]; then
+      is_loopback_only=0
+      break
     fi
-  fi
-  if [[ "$EXISTING_REDIRECTS" == *"chatgpt"* || "$EXISTING_REDIRECTS" == *"openai"* ]]; then
-    DEFAULT_NUMS+=("4")
+  done
+
+  if (( is_loopback_only )); then
+    DEFAULT_NUMS=("1" "2" "3")
+  else
+    if [[ "$EXISTING_REDIRECTS" == *"googleusercontent"* || "$EXISTING_REDIRECTS" == *"vertexaisearch"* ]]; then
+      DEFAULT_NUMS+=("1")
+    fi
+    if [[ "$EXISTING_REDIRECTS" == *"localhost"* || "$EXISTING_REDIRECTS" == *"127.0.0.1"* || "$EXISTING_REDIRECTS" == *"claude"* ]]; then
+      DEFAULT_NUMS+=("2" "3")
+    fi
+    if [[ "$EXISTING_REDIRECTS" == *"chatgpt"* || "$EXISTING_REDIRECTS" == *"openai"* ]]; then
+      DEFAULT_NUMS+=("4")
+    fi
   fi
   if (( ${#DEFAULT_NUMS[@]} > 0 )); then
     DEFAULT_SELECTION=$(join_by ", " "${DEFAULT_NUMS[@]}")

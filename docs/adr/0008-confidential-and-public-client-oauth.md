@@ -1,6 +1,6 @@
 # Support Both Public and Confidential Clients in Dynamic Client Registration
 
-> **Status**: Accepted (Amends [ADR-0007](0007-dynamic-client-registration.md))
+> **Status**: Accepted (Amends [ADR-0007](0007-dynamic-client-registration.md); Amended by [ADR-0009](0009-explicit-env-redirect-allowlist-and-registration-resilience.md))
 
 ## Context
 

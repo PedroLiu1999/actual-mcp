@@ -19,7 +19,10 @@ import {
   EmbeddedOAuthProvider,
   SUPPORTED_TOKEN_ENDPOINT_AUTH_METHODS,
 } from './auth/provider.js';
-import { normalizeRegistrationBody } from './auth/registration.js';
+import {
+  extractCandidateRedirectUris,
+  normalizeRegistrationBody,
+} from './auth/registration.js';
 import type { AppConfig } from './config.js';
 import type { BudgetGateway } from './gateway/types.js';
 import { BRAND_ICON_DATA_URI } from './mcp/icon.js';
@@ -198,13 +201,8 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
           body: req.body,
         });
 
-        if (req.body && typeof req.body === 'object') {
-          const candidateUris = (req.body as Record<string, unknown>).redirect_uris;
-          if (Array.isArray(candidateUris)) {
-            for (const uri of candidateUris) {
-              oauthProvider.recordCandidateRedirectUri(uri);
-            }
-          }
+        for (const uri of extractCandidateRedirectUris(req.body)) {
+          oauthProvider.recordCandidateRedirectUri(uri);
         }
       }
       next();

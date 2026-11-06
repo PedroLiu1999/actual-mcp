@@ -1,4 +1,7 @@
-function parseCommaSeparatedList(val: unknown): string[] | undefined {
+/**
+ * Parses a comma-separated string or array into a clean list of trimmed strings.
+ */
+export function parseList(val: unknown): string[] {
   if (Array.isArray(val)) {
     return val.map((s) => String(s).trim()).filter(Boolean);
   }
@@ -8,8 +11,10 @@ function parseCommaSeparatedList(val: unknown): string[] | undefined {
       .map((s) => s.trim())
       .filter(Boolean);
   }
-  return undefined;
+  return [];
 }
+
+const LIST_KEYS = ['grant_types', 'response_types', 'contacts'] as const;
 
 const EMPTY_URL_KEYS = [
   'client_uri',
@@ -34,8 +39,8 @@ export function normalizeRegistrationBody(body: unknown): unknown {
   if (record.redirect_uri && !record.redirect_uris) {
     record.redirect_uris = [String(record.redirect_uri)];
   } else if (record.redirect_uris !== undefined) {
-    const parsed = parseCommaSeparatedList(record.redirect_uris);
-    if (parsed) {
+    const parsed = parseList(record.redirect_uris);
+    if (parsed.length > 0) {
       record.redirect_uris = parsed;
     }
   }
@@ -49,23 +54,13 @@ export function normalizeRegistrationBody(body: unknown): unknown {
     record.scope = record.scopes;
   }
 
-  // 3. Normalize grant_types, response_types, contacts
-  if (record.grant_types !== undefined) {
-    const parsed = parseCommaSeparatedList(record.grant_types);
-    if (parsed) {
-      record.grant_types = parsed;
-    }
-  }
-  if (record.response_types !== undefined) {
-    const parsed = parseCommaSeparatedList(record.response_types);
-    if (parsed) {
-      record.response_types = parsed;
-    }
-  }
-  if (record.contacts !== undefined) {
-    const parsed = parseCommaSeparatedList(record.contacts);
-    if (parsed) {
-      record.contacts = parsed;
+  // 3. Normalize list properties (grant_types, response_types, contacts)
+  for (const key of LIST_KEYS) {
+    if (record[key] !== undefined) {
+      const parsed = parseList(record[key]);
+      if (parsed.length > 0) {
+        record[key] = parsed;
+      }
     }
   }
 
@@ -77,4 +72,17 @@ export function normalizeRegistrationBody(body: unknown): unknown {
   }
 
   return record;
+}
+
+/**
+ * Extracts candidate redirect URIs from a normalized registration body.
+ */
+export function extractCandidateRedirectUris(body: unknown): string[] {
+  if (body && typeof body === 'object') {
+    const uris = (body as Record<string, unknown>).redirect_uris;
+    if (Array.isArray(uris)) {
+      return uris.filter((u): u is string => typeof u === 'string');
+    }
+  }
+  return [];
 }

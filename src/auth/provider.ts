@@ -279,6 +279,23 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
     }
   }
 
+  evictExpiredAuthorizationCodes(
+    nowSeconds: number = Math.floor(Date.now() / 1000),
+  ): number {
+    let evictedCount = 0;
+    for (const [code, record] of this.authorizationCodes.entries()) {
+      if (record.expiresAt <= nowSeconds) {
+        this.authorizationCodes.delete(code);
+        evictedCount++;
+      }
+    }
+    return evictedCount;
+  }
+
+  getAuthorizationCodeCount(): number {
+    return this.authorizationCodes.size;
+  }
+
   get clientsStore(): OAuthRegisteredClientsStore {
     return this.store;
   }
@@ -316,6 +333,7 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
 
       const code = randomBytes(32).toString('hex');
       const nowSeconds = Math.floor(Date.now() / 1000);
+      this.evictExpiredAuthorizationCodes(nowSeconds);
       this.authorizationCodes.set(code, {
         code,
         clientId: client.client_id,
@@ -350,8 +368,9 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
     client: OAuthClientInformationFull,
     authorizationCode: string,
   ): Promise<string> {
-    const record = this.authorizationCodes.get(authorizationCode);
     const nowSeconds = Math.floor(Date.now() / 1000);
+    this.evictExpiredAuthorizationCodes(nowSeconds);
+    const record = this.authorizationCodes.get(authorizationCode);
     if (!record || record.clientId !== client.client_id || record.expiresAt <= nowSeconds) {
       if (record && record.expiresAt <= nowSeconds) {
         this.authorizationCodes.delete(authorizationCode);
@@ -368,10 +387,11 @@ export class EmbeddedOAuthProvider implements OAuthServerProvider {
     redirectUri?: string,
     resource?: URL,
   ): Promise<OAuthTokens> {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    this.evictExpiredAuthorizationCodes(nowSeconds);
     const record = this.authorizationCodes.get(authorizationCode);
     this.authorizationCodes.delete(authorizationCode);
 
-    const nowSeconds = Math.floor(Date.now() / 1000);
     if (!record || record.clientId !== client.client_id || record.expiresAt <= nowSeconds) {
       throw new InvalidGrantError('Invalid or expired authorization code');
     }

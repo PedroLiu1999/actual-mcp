@@ -4,11 +4,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `POST /token` enforces IP rate limiting (30 requests per minute per IP), returning HTTP 429 Too Many Requests when the limit is exceeded.
-- [ ] `POST /revoke` enforces IP rate limiting (30 requests per minute per IP), returning HTTP 429 Too Many Requests when the limit is exceeded.
-- [ ] Expired authorization codes (older than 10 minutes) are automatically pruned from in-memory maps during authorization code creation or lookup.
-- [ ] Pruned or expired authorization codes cannot be redeemed at `POST /token` and return an `invalid_grant` error.
-- [ ] Legitimate token exchanges, token refreshes, and revocation flows within normal limits continue to operate smoothly.
-- [ ] Integration tests at the HTTP application seam verify the rate limit rejections and expired code eviction behavior.
+- [x] `POST /token` enforces IP rate limiting (30 requests per minute per IP), returning HTTP 429 Too Many Requests when the limit is exceeded.
+- [x] `POST /revoke` enforces IP rate limiting (30 requests per minute per IP), returning HTTP 429 Too Many Requests when the limit is exceeded.
+- [x] Expired authorization codes (older than 10 minutes) are automatically pruned from in-memory maps during authorization code creation or lookup.
+- [x] Pruned or expired authorization codes cannot be redeemed at `POST /token` and return an `invalid_grant` error.
+- [x] Legitimate token exchanges, token refreshes, and revocation flows within normal limits continue to operate smoothly.
+- [x] Integration tests at the HTTP application seam verify the rate limit rejections and expired code eviction behavior.

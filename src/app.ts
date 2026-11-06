@@ -31,9 +31,14 @@ import { createMcpServer } from './mcp/server.js';
 export interface CreateAppOptions {
   config: AppConfig;
   budgetGateway: BudgetGateway;
+  oauthProvider?: EmbeddedOAuthProvider;
 }
 
-export function createApp({ config, budgetGateway }: CreateAppOptions): Express {
+export function createApp({
+  config,
+  budgetGateway,
+  oauthProvider: customOAuthProvider,
+}: CreateAppOptions): Express {
   const app = express();
   app.set('trust proxy', 1);
 
@@ -55,7 +60,7 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
   const issuerUrl = new URL(config.PUBLIC_URL);
   const resourceServerUrl = new URL(`${config.PUBLIC_URL}/mcp`);
   const scopesSupported = ['mcp:tools'];
-  const oauthProvider = new EmbeddedOAuthProvider(config);
+  const oauthProvider = customOAuthProvider ?? new EmbeddedOAuthProvider(config);
   const logoUrl = config.LOGO_URL ?? `${config.PUBLIC_URL}/logo.png`;
 
   const oauthMetadata: OAuthMetadata = {
@@ -137,6 +142,24 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
   });
 
   app.post('/register', registerPostLimiter);
+
+  const tokenPostLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  app.post('/token', tokenPostLimiter);
+
+  const revokePostLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  app.post('/revoke', revokePostLimiter);
 
   app.use('/authorize', express.urlencoded({ extended: false }), (req, _res, next) => {
     if (req.method === 'POST') {
@@ -261,6 +284,12 @@ export function createApp({ config, budgetGateway }: CreateAppOptions): Express 
       scopesSupported,
       resourceName: 'Actual Budget MCP Server',
       clientRegistrationOptions: {
+        rateLimit: false,
+      },
+      tokenOptions: {
+        rateLimit: false,
+      },
+      revocationOptions: {
         rateLimit: false,
       },
     }),

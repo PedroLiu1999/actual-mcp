@@ -5,6 +5,7 @@ import path from 'node:path';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app.js';
+import { EmbeddedOAuthProvider } from '../src/auth/provider.js';
 import { loadConfig, type AppConfig } from '../src/config.js';
 import type { BudgetGateway } from '../src/gateway/types.js';
 
@@ -1183,6 +1184,246 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
         expect(incomingArg.body).toBeUndefined();
       } finally {
         logSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('Token Route Rate Limiting & Expired Auth Code Pruning (Ticket 03)', () => {
+    it('enforces IP rate limiting on POST /token (30 requests per minute per IP) with HTTP 429 and standard headers', async () => {
+      const app = createApp({ config, budgetGateway: createStubGateway() });
+      const clientIp = '203.0.113.80';
+
+      for (let i = 1; i <= 30; i++) {
+        const res = await request(app)
+          .post('/token')
+          .set('Host', 'mcp.example.com')
+          .set('X-Forwarded-For', clientIp)
+          .type('form')
+          .send({
+            grant_type: 'authorization_code',
+            client_id: 'gemini-client',
+            code: `invalid-code-${i}`,
+            redirect_uri: 'http://localhost:54321/callback',
+          });
+        // Non-rate-limited response will fail grant verification (400) or client lookup, but NOT 429
+        expect(res.status).toBe(400);
+      }
+
+      // 31st request from same IP must be rate limited with HTTP 429
+      const rateLimitedRes = await request(app)
+        .post('/token')
+        .set('Host', 'mcp.example.com')
+        .set('X-Forwarded-For', clientIp)
+        .type('form')
+        .send({
+          grant_type: 'authorization_code',
+          client_id: 'gemini-client',
+          code: 'invalid-code-31',
+          redirect_uri: 'http://localhost:54321/callback',
+        });
+
+      expect(rateLimitedRes.status).toBe(429);
+      expect(rateLimitedRes.headers['ratelimit-limit']).toBe('30');
+      expect(rateLimitedRes.headers['ratelimit-remaining']).toBe('0');
+      expect(rateLimitedRes.headers['ratelimit-reset']).toBeDefined();
+
+      // Request from another IP under the limit must not be rate limited
+      const differentIpRes = await request(app)
+        .post('/token')
+        .set('Host', 'mcp.example.com')
+        .set('X-Forwarded-For', '203.0.113.81')
+        .type('form')
+        .send({
+          grant_type: 'authorization_code',
+          client_id: 'gemini-client',
+          code: 'invalid-code-other-ip',
+          redirect_uri: 'http://localhost:54321/callback',
+        });
+
+      expect(differentIpRes.status).toBe(400);
+      expect(differentIpRes.headers['ratelimit-remaining']).toBe('29');
+    });
+
+    it('enforces IP rate limiting on POST /revoke (30 requests per minute per IP) with HTTP 429 and standard headers', async () => {
+      const app = createApp({ config, budgetGateway: createStubGateway() });
+      const clientIp = '203.0.113.90';
+
+      for (let i = 1; i <= 30; i++) {
+        const res = await request(app)
+          .post('/revoke')
+          .set('Host', 'mcp.example.com')
+          .set('X-Forwarded-For', clientIp)
+          .type('form')
+          .send({
+            client_id: 'gemini-client',
+            token: `token-to-revoke-${i}`,
+          });
+        expect(res.status).toBe(200);
+      }
+
+      // 31st request from same IP must be rate limited with HTTP 429
+      const rateLimitedRes = await request(app)
+        .post('/revoke')
+        .set('Host', 'mcp.example.com')
+        .set('X-Forwarded-For', clientIp)
+        .type('form')
+        .send({
+          client_id: 'gemini-client',
+          token: 'token-to-revoke-31',
+        });
+
+      expect(rateLimitedRes.status).toBe(429);
+      expect(rateLimitedRes.headers['ratelimit-limit']).toBe('30');
+      expect(rateLimitedRes.headers['ratelimit-remaining']).toBe('0');
+      expect(rateLimitedRes.headers['ratelimit-reset']).toBeDefined();
+
+      // Request from another IP under the limit must succeed
+      const differentIpRes = await request(app)
+        .post('/revoke')
+        .set('Host', 'mcp.example.com')
+        .set('X-Forwarded-For', '203.0.113.91')
+        .type('form')
+        .send({
+          client_id: 'gemini-client',
+          token: 'token-to-revoke-other-ip',
+        });
+
+      expect(differentIpRes.status).toBe(200);
+      expect(differentIpRes.headers['ratelimit-remaining']).toBe('29');
+    });
+
+    it('automatically prunes expired authorization codes from memory and rejects their redemption', async () => {
+      const oauthProvider = new EmbeddedOAuthProvider(config);
+      const app = createApp({ config, budgetGateway: createStubGateway(), oauthProvider });
+      const redirectUri = 'http://localhost:54321/callback';
+      const codeVerifier1 = 'code-verifier-number-one-with-sufficient-entropy-1234567890';
+      const codeChallenge1 = createHash('sha256').update(codeVerifier1).digest('base64url');
+
+      const initialTime = 1700000000000;
+      const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(initialTime);
+
+      try {
+        // Step 1: Issue first authorization code at T=0
+        const authRes1 = await request(app)
+          .post('/authorize')
+          .set('Host', 'mcp.example.com')
+          .type('form')
+          .send({
+            response_type: 'code',
+            client_id: 'gemini-client',
+            redirect_uri: redirectUri,
+            code_challenge: codeChallenge1,
+            code_challenge_method: 'S256',
+            password: 'correct-horse-battery-staple',
+          });
+
+        expect(authRes1.status).toBe(302);
+        const code1 = new URL(authRes1.headers.location).searchParams.get('code')!;
+        expect(code1).toBeTruthy();
+        expect(oauthProvider.getAuthorizationCodeCount()).toBe(1);
+
+        // Step 2: Advance time past expiration (> 10 minutes = 600s, e.g. 601s)
+        dateSpy.mockReturnValue(initialTime + 601 * 1000);
+
+        // Issue second authorization code at T=601s -> triggers automatic eviction of code1
+        const codeVerifier2 = 'code-verifier-number-two-with-sufficient-entropy-1234567890';
+        const codeChallenge2 = createHash('sha256').update(codeVerifier2).digest('base64url');
+
+        const authRes2 = await request(app)
+          .post('/authorize')
+          .set('Host', 'mcp.example.com')
+          .type('form')
+          .send({
+            response_type: 'code',
+            client_id: 'gemini-client',
+            redirect_uri: redirectUri,
+            code_challenge: codeChallenge2,
+            code_challenge_method: 'S256',
+            password: 'correct-horse-battery-staple',
+          });
+
+        expect(authRes2.status).toBe(302);
+        const code2 = new URL(authRes2.headers.location).searchParams.get('code')!;
+        expect(code2).toBeTruthy();
+
+        // Expired code1 must have been automatically pruned from memory
+        expect(oauthProvider.getAuthorizationCodeCount()).toBe(1);
+
+        // Step 3: Attempting to redeem expired/pruned code1 at POST /token returns invalid_grant
+        const tokenRes1 = await request(app)
+          .post('/token')
+          .set('Host', 'mcp.example.com')
+          .type('form')
+          .send({
+            grant_type: 'authorization_code',
+            client_id: 'gemini-client',
+            code: code1,
+            code_verifier: codeVerifier1,
+            redirect_uri: redirectUri,
+          });
+
+        expect(tokenRes1.status).toBe(400);
+        expect(tokenRes1.body.error).toBe('invalid_grant');
+
+        // Step 4: Valid code2 can be redeemed successfully
+        const tokenRes2 = await request(app)
+          .post('/token')
+          .set('Host', 'mcp.example.com')
+          .type('form')
+          .send({
+            grant_type: 'authorization_code',
+            client_id: 'gemini-client',
+            code: code2,
+            code_verifier: codeVerifier2,
+            redirect_uri: redirectUri,
+          });
+
+        expect(tokenRes2.status).toBe(200);
+        expect(tokenRes2.body.access_token).toBeDefined();
+
+        // After redemption, authorization code map is empty
+        expect(oauthProvider.getAuthorizationCodeCount()).toBe(0);
+
+        // Step 5: Test lookup pruning when a code expires and client attempts to redeem directly
+        dateSpy.mockReturnValue(initialTime + 1000 * 1000);
+        const authRes3 = await request(app)
+          .post('/authorize')
+          .set('Host', 'mcp.example.com')
+          .type('form')
+          .send({
+            response_type: 'code',
+            client_id: 'gemini-client',
+            redirect_uri: redirectUri,
+            code_challenge: codeChallenge1,
+            code_challenge_method: 'S256',
+            password: 'correct-horse-battery-staple',
+          });
+        const code3 = new URL(authRes3.headers.location).searchParams.get('code')!;
+        expect(oauthProvider.getAuthorizationCodeCount()).toBe(1);
+
+        // Advance past expiration
+        dateSpy.mockReturnValue(initialTime + 1000 * 1000 + 605 * 1000);
+
+        // Redemption triggers pruning during lookup
+        const tokenRes3 = await request(app)
+          .post('/token')
+          .set('Host', 'mcp.example.com')
+          .type('form')
+          .send({
+            grant_type: 'authorization_code',
+            client_id: 'gemini-client',
+            code: code3,
+            code_verifier: codeVerifier1,
+            redirect_uri: redirectUri,
+          });
+        expect(tokenRes3.status).toBe(400);
+        expect(tokenRes3.body.error).toBe('invalid_grant');
+        expect(oauthProvider.getAuthorizationCodeCount()).toBe(0);
+
+        // Helper evictExpiredAuthorizationCodes method works directly
+        expect(oauthProvider.evictExpiredAuthorizationCodes(Math.floor(Date.now() / 1000))).toBe(0);
+      } finally {
+        dateSpy.mockRestore();
       }
     });
   });

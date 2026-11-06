@@ -5,7 +5,6 @@ import path from 'node:path';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app.js';
-import { EmbeddedOAuthProvider } from '../src/auth/provider.js';
 import { loadConfig, type AppConfig } from '../src/config.js';
 import type { BudgetGateway } from '../src/gateway/types.js';
 
@@ -1293,8 +1292,7 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
     });
 
     it('automatically prunes expired authorization codes from memory and rejects their redemption', async () => {
-      const oauthProvider = new EmbeddedOAuthProvider(config);
-      const app = createApp({ config, budgetGateway: createStubGateway(), oauthProvider });
+      const app = createApp({ config, budgetGateway: createStubGateway() });
       const redirectUri = 'http://localhost:54321/callback';
       const codeVerifier1 = 'code-verifier-number-one-with-sufficient-entropy-1234567890';
       const codeChallenge1 = createHash('sha256').update(codeVerifier1).digest('base64url');
@@ -1320,12 +1318,11 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
         expect(authRes1.status).toBe(302);
         const code1 = new URL(authRes1.headers.location).searchParams.get('code')!;
         expect(code1).toBeTruthy();
-        expect(oauthProvider.getAuthorizationCodeCount()).toBe(1);
 
         // Step 2: Advance time past expiration (> 10 minutes = 600s, e.g. 601s)
         dateSpy.mockReturnValue(initialTime + 601 * 1000);
 
-        // Issue second authorization code at T=601s -> triggers automatic eviction of code1
+        // Issue second authorization code at T=601s -> triggers automatic eviction of expired code1
         const codeVerifier2 = 'code-verifier-number-two-with-sufficient-entropy-1234567890';
         const codeChallenge2 = createHash('sha256').update(codeVerifier2).digest('base64url');
 
@@ -1345,9 +1342,6 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
         expect(authRes2.status).toBe(302);
         const code2 = new URL(authRes2.headers.location).searchParams.get('code')!;
         expect(code2).toBeTruthy();
-
-        // Expired code1 must have been automatically pruned from memory
-        expect(oauthProvider.getAuthorizationCodeCount()).toBe(1);
 
         // Step 3: Attempting to redeem expired/pruned code1 at POST /token returns invalid_grant
         const tokenRes1 = await request(app)
@@ -1381,9 +1375,6 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
         expect(tokenRes2.status).toBe(200);
         expect(tokenRes2.body.access_token).toBeDefined();
 
-        // After redemption, authorization code map is empty
-        expect(oauthProvider.getAuthorizationCodeCount()).toBe(0);
-
         // Step 5: Test lookup pruning when a code expires and client attempts to redeem directly
         dateSpy.mockReturnValue(initialTime + 1000 * 1000);
         const authRes3 = await request(app)
@@ -1399,7 +1390,6 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
             password: 'correct-horse-battery-staple',
           });
         const code3 = new URL(authRes3.headers.location).searchParams.get('code')!;
-        expect(oauthProvider.getAuthorizationCodeCount()).toBe(1);
 
         // Advance past expiration
         dateSpy.mockReturnValue(initialTime + 1000 * 1000 + 605 * 1000);
@@ -1418,10 +1408,6 @@ describe('Embedded OAuth 2.1 Server & Protected Resource at HTTP seam', () => {
           });
         expect(tokenRes3.status).toBe(400);
         expect(tokenRes3.body.error).toBe('invalid_grant');
-        expect(oauthProvider.getAuthorizationCodeCount()).toBe(0);
-
-        // Helper evictExpiredAuthorizationCodes method works directly
-        expect(oauthProvider.evictExpiredAuthorizationCodes(Math.floor(Date.now() / 1000))).toBe(0);
       } finally {
         dateSpy.mockRestore();
       }

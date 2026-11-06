@@ -31,13 +31,54 @@ import { createMcpServer } from './mcp/server.js';
 export interface CreateAppOptions {
   config: AppConfig;
   budgetGateway: BudgetGateway;
-  oauthProvider?: EmbeddedOAuthProvider;
+}
+
+export function createTokenRateLimiter() {
+  return rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+}
+
+export function sanitizeClientMetadata(record: unknown): {
+  client_id?: string;
+  client_name?: string;
+  token_endpoint_auth_method?: string;
+  redirect_uris_count?: number;
+} {
+  if (!record || typeof record !== 'object') {
+    return {
+      client_id: undefined,
+      client_name: undefined,
+      token_endpoint_auth_method: undefined,
+      redirect_uris_count: undefined,
+    };
+  }
+  const obj = record as Record<string, unknown>;
+  const redirectUris = Array.isArray(obj.redirect_uris)
+    ? obj.redirect_uris
+    : typeof obj.redirect_uris === 'string'
+      ? [obj.redirect_uris]
+      : typeof obj.redirect_uri === 'string'
+        ? [obj.redirect_uri]
+        : undefined;
+
+  return {
+    client_id: typeof obj.client_id === 'string' ? obj.client_id : undefined,
+    client_name: typeof obj.client_name === 'string' ? obj.client_name : undefined,
+    token_endpoint_auth_method:
+      typeof obj.token_endpoint_auth_method === 'string'
+        ? obj.token_endpoint_auth_method
+        : undefined,
+    redirect_uris_count: redirectUris !== undefined ? redirectUris.length : undefined,
+  };
 }
 
 export function createApp({
   config,
   budgetGateway,
-  oauthProvider: customOAuthProvider,
 }: CreateAppOptions): Express {
   const app = express();
   app.set('trust proxy', 1);
@@ -60,7 +101,7 @@ export function createApp({
   const issuerUrl = new URL(config.PUBLIC_URL);
   const resourceServerUrl = new URL(`${config.PUBLIC_URL}/mcp`);
   const scopesSupported = ['mcp:tools'];
-  const oauthProvider = customOAuthProvider ?? new EmbeddedOAuthProvider(config);
+  const oauthProvider = new EmbeddedOAuthProvider(config);
   const logoUrl = config.LOGO_URL ?? `${config.PUBLIC_URL}/logo.png`;
 
   const oauthMetadata: OAuthMetadata = {
@@ -143,22 +184,10 @@ export function createApp({
 
   app.post('/register', registerPostLimiter);
 
-  const tokenPostLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 30,
-    standardHeaders: true,
-    legacyHeaders: false,
-  });
-
+  const tokenPostLimiter = createTokenRateLimiter();
   app.post('/token', tokenPostLimiter);
 
-  const revokePostLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 30,
-    standardHeaders: true,
-    legacyHeaders: false,
-  });
-
+  const revokePostLimiter = createTokenRateLimiter();
   app.post('/revoke', revokePostLimiter);
 
   app.use('/authorize', express.urlencoded({ extended: false }), (req, _res, next) => {
@@ -223,18 +252,9 @@ export function createApp({
             JSON.stringify(body),
           );
         } else {
-          const respObj = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
-          const sanitizedResp = {
-            client_id: respObj.client_id,
-            client_name: respObj.client_name,
-            token_endpoint_auth_method: respObj.token_endpoint_auth_method,
-            redirect_uris_count: Array.isArray(respObj.redirect_uris)
-              ? respObj.redirect_uris.length
-              : undefined,
-          };
           console.log(
             `[register] ✅ ${res.statusCode} client registered:`,
-            JSON.stringify(sanitizedResp),
+            JSON.stringify(sanitizeClientMetadata(body)),
           );
         }
         return originalJson(body);
@@ -243,29 +263,10 @@ export function createApp({
       if (req.method === 'POST') {
         req.body = normalizeRegistrationBody(req.body);
 
-        const redirectUris = Array.isArray(req.body?.redirect_uris)
-          ? req.body.redirect_uris
-          : typeof req.body?.redirect_uris === 'string'
-            ? [req.body.redirect_uris]
-            : typeof req.body?.redirect_uri === 'string'
-              ? [req.body.redirect_uri]
-              : [];
-
-        const sanitizedMeta = {
-          client_id: typeof req.body?.client_id === 'string' ? req.body.client_id : undefined,
-          client_name:
-            typeof req.body?.client_name === 'string' ? req.body.client_name : undefined,
-          token_endpoint_auth_method:
-            typeof req.body?.token_endpoint_auth_method === 'string'
-              ? req.body.token_endpoint_auth_method
-              : undefined,
-          redirect_uris_count: redirectUris.length,
-        };
-
         console.log(`[register] 📥 incoming registration request:`, {
           contentType: req.headers['content-type'],
           userAgent: req.headers['user-agent'],
-          metadata: sanitizedMeta,
+          metadata: sanitizeClientMetadata(req.body),
         });
 
         for (const uri of extractCandidateRedirectUris(req.body)) {

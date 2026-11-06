@@ -1,12 +1,12 @@
-<p align="center">
+<div align="center">
 
 ![actual-mcp logo](https://raw.githubusercontent.com/PedroLiu1999/actual-mcp/main/docs/assets/logo/dist/actual-mcp-horizontal.svg)
 
-</p>
+</div>
 
 # actual-mcp
 
-<p align="center">
+<div align="center">
 
 [![CI](https://github.com/PedroLiu1999/actual-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/PedroLiu1999/actual-mcp/actions/workflows/ci.yml)
 [![Docker](https://github.com/PedroLiu1999/actual-mcp/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/PedroLiu1999/actual-mcp/actions/workflows/docker-publish.yml)
@@ -15,7 +15,7 @@
 [![Model Context Protocol](https://img.shields.io/badge/MCP-Streamable%20HTTP-blueviolet.svg)](https://modelcontextprotocol.io/)
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/pedroliu1999/actual-mcp)
 
-</p>
+</div>
 
 A self-contained Model Context Protocol (MCP) server that connects a self-hosted [Actual Budget](https://actualbudget.org/) instance to AI assistants, including Claude Desktop, Cursor, Google Gemini, and custom agents. The server communicates over Streamable HTTP (`POST /mcp`) and includes an embedded OAuth 2.1 server that supports PKCE and RFC 7591 dynamic client registration.
 

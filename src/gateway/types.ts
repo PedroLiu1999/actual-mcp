@@ -516,6 +516,37 @@ export interface UpdateRuleInput {
   actions: RuleAction[];
 }
 
+export type AutomationTarget = 'schedule' | 'rule';
+
+export type AutomationAction = 'create' | 'update' | 'delete' | 'preview_dates';
+
+export interface ManageAutomationsInput {
+  target: AutomationTarget;
+  action: AutomationAction;
+  id?: string;
+  scheduleId?: string;
+  name?: string;
+  account?: string;
+  accountId?: string;
+  payee?: string | null;
+  payeeId?: string | null;
+  /** Decimal Amount */
+  amount?: ScheduleAmount;
+  amountOp?: ScheduleAmountOp;
+  date?: unknown;
+  postsTransaction?: boolean;
+  posts_transaction?: boolean;
+  resetNextDate?: boolean;
+  start?: string;
+  end?: string;
+  count?: number;
+  forceSync?: boolean;
+  stage?: 'pre' | 'post' | 'default' | null;
+  conditionsOp?: 'and' | 'or';
+  conditions?: RuleCondition[];
+  actions?: RuleAction[];
+}
+
 export interface BudgetGateway {
   getReadiness(): BudgetReadiness;
   listAccounts(options?: { forceSync?: boolean }): Promise<AccountSummary[]>;
@@ -581,6 +612,7 @@ export interface BudgetGateway {
   createRule?(input: CreateRuleInput): Promise<RuleSummary>;
   updateRule?(input: UpdateRuleInput): Promise<RuleSummary>;
   deleteRule?(id: string): Promise<{ id: string }>;
+  manageAutomations?(input: ManageAutomationsInput): Promise<ResourceFacadeResult<unknown>>;
   initialize?(): Promise<void>;
   sync?(): Promise<void>;
   shutdown?(): Promise<void>;

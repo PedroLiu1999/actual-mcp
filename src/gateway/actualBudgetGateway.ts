@@ -68,7 +68,17 @@ import type {
   ScheduleSummary,
   UpdateRuleInput,
   UpdateScheduleInput,
+  ManageAutomationsInput,
+  ResourceFacadeResult,
+  BudgetCacheSource,
 } from './types.js';
+import {
+  createResourceFacadeResponse,
+  resolveAccount,
+  resolveCategory,
+  resolvePayee,
+  resolveSchedule,
+} from './resolver.js';
 
 export interface ActualAccountRecord {
   id: string;
@@ -370,6 +380,7 @@ export interface ActualBudgetGateway extends BudgetGateway {
   createRule(input: CreateRuleInput): Promise<RuleSummary>;
   updateRule(input: UpdateRuleInput): Promise<RuleSummary>;
   deleteRule(id: string): Promise<{ id: string }>;
+  manageAutomations(input: ManageAutomationsInput): Promise<ResourceFacadeResult<unknown>>;
   executeRead<T>(
     operation: (api: ActualApiAdapter) => Promise<T>,
     options?: { forceSync?: boolean },
@@ -490,6 +501,107 @@ const convertRuleActionsToInternal = (actions: RuleAction[]): RuleAction[] =>
 
 const convertRuleActionsToExternal = (actions: RuleAction[]): RuleAction[] =>
   transformRuleActionsAmount(actions, minorToDecimalAmount);
+
+const ENTITY_MATCH_OPS = new Set(['is', 'isNot', 'oneOf', 'notOneOf']);
+
+async function resolveRuleEntityValue(
+  field: string,
+  value: unknown,
+  source: BudgetCacheSource,
+  resolved: Record<string, string>,
+): Promise<unknown> {
+  const resolveSingle = async (item: unknown): Promise<unknown> => {
+    if (typeof item !== 'string' || item.trim().length === 0) {
+      return item;
+    }
+    if (field === 'payee') {
+      const entity = await resolvePayee(item, source, resolved);
+      return entity.id;
+    }
+    if (field === 'account') {
+      const entity = await resolveAccount(item, source, resolved);
+      return entity.id;
+    }
+    if (field === 'category') {
+      const entity = await resolveCategory(item, source, resolved);
+      return entity.id;
+    }
+    if (field === 'schedule') {
+      const entity = await resolveSchedule(item, source, resolved);
+      return entity.id;
+    }
+    return item;
+  };
+
+  if (Array.isArray(value)) {
+    const resolvedArray: unknown[] = [];
+    for (const item of value) {
+      resolvedArray.push(await resolveSingle(item));
+    }
+    return resolvedArray;
+  }
+
+  return resolveSingle(value);
+}
+
+async function resolveRuleConditionsEntities(
+  conditions: RuleCondition[],
+  source: BudgetCacheSource,
+  resolved: Record<string, string>,
+): Promise<RuleCondition[]> {
+  const result: RuleCondition[] = [];
+  for (const cond of conditions) {
+    if (
+      (cond.field === 'payee' || cond.field === 'account' || cond.field === 'category') &&
+      ENTITY_MATCH_OPS.has(cond.op)
+    ) {
+      const resolvedValue = await resolveRuleEntityValue(
+        cond.field,
+        cond.value,
+        source,
+        resolved,
+      );
+      result.push({ ...cond, value: resolvedValue });
+    } else {
+      result.push(cond);
+    }
+  }
+  return result;
+}
+
+async function resolveRuleActionsEntities(
+  actions: RuleAction[],
+  source: BudgetCacheSource,
+  resolved: Record<string, string>,
+): Promise<RuleAction[]> {
+  const result: RuleAction[] = [];
+  for (const act of actions) {
+    if (
+      act.field === 'payee' ||
+      act.field === 'account' ||
+      act.field === 'category'
+    ) {
+      const resolvedValue = await resolveRuleEntityValue(
+        act.field,
+        act.value,
+        source,
+        resolved,
+      );
+      result.push({ ...act, value: resolvedValue });
+    } else if (act.op === 'link-schedule') {
+      const resolvedValue = await resolveRuleEntityValue(
+        'schedule',
+        act.value,
+        source,
+        resolved,
+      );
+      result.push({ ...act, value: resolvedValue });
+    } else {
+      result.push(act);
+    }
+  }
+  return result;
+}
 
 function formatRuleSummary(rawRule: ActualRuleRecord): RuleSummary {
   const conditions = Array.isArray(rawRule.conditions)
@@ -2506,6 +2618,348 @@ export function createActualBudgetGateway(
         await apiAdapter.deleteRule(id);
         return { id };
       });
+    },
+    async manageAutomations(
+      input: ManageAutomationsInput,
+    ): Promise<ResourceFacadeResult<unknown>> {
+      const resolved: Record<string, string> = {};
+
+      if (input.target === 'schedule') {
+        if (input.action === 'create') {
+          const rawAccount = input.account ?? input.accountId;
+          if (!rawAccount) {
+            throw new Error('account or accountId is required when creating a schedule');
+          }
+          if (input.amount === undefined) {
+            throw new Error('amount is required when creating a schedule');
+          }
+          if (input.date === undefined) {
+            throw new Error('date is required when creating a schedule');
+          }
+
+          return executeWrite(async (apiAdapter) => {
+            if (!apiAdapter.createSchedule) {
+              throw new Error('createSchedule is not supported by the current API adapter');
+            }
+            const resolvedAcct = await resolveAccount(rawAccount, apiAdapter, resolved);
+            const rawPayee =
+              input.payee !== undefined ? input.payee : input.payeeId;
+            let resolvedPayeeId: string | null = null;
+            if (typeof rawPayee === 'string' && rawPayee.trim().length > 0) {
+              const resolvedPayee = await resolvePayee(rawPayee, apiAdapter, resolved);
+              resolvedPayeeId = resolvedPayee.id;
+            }
+
+            const minorAmount = convertScheduleAmountToMinor(input.amount!);
+            const postsTx =
+              input.postsTransaction ?? input.posts_transaction ?? false;
+            const id = await apiAdapter.createSchedule({
+              ...(input.name !== undefined ? { name: input.name } : {}),
+              account: resolvedAcct.id,
+              payee: resolvedPayeeId,
+              amount: minorAmount,
+              amountOp: input.amountOp ?? 'is',
+              date: input.date,
+              posts_transaction: postsTx,
+            });
+
+            return createResourceFacadeResponse({
+              message: input.name
+                ? `Created schedule "${input.name}" (${id})`
+                : `Created schedule ${id}`,
+              data: {
+                id,
+                ...(input.name !== undefined ? { name: input.name } : {}),
+                account: resolvedAcct.id,
+                payee: resolvedPayeeId,
+                amount: input.amount,
+                amountOp: input.amountOp ?? 'is',
+                date: input.date,
+                posts_transaction: postsTx,
+              },
+              resolved,
+            });
+          });
+        }
+
+        if (input.action === 'update') {
+          const scheduleRef = input.id ?? input.scheduleId;
+          if (!scheduleRef) {
+            throw new Error('id or scheduleId is required when updating a schedule');
+          }
+
+          return executeWrite(async (apiAdapter) => {
+            if (!apiAdapter.updateSchedule) {
+              throw new Error('updateSchedule is not supported by the current API adapter');
+            }
+            const resolvedSched = await resolveSchedule(scheduleRef, apiAdapter, resolved);
+            const scheduleId = resolvedSched.id;
+
+            const internalFields: Record<string, unknown> = {};
+            const externalFields: Record<string, unknown> = {};
+
+            if (input.name !== undefined) {
+              internalFields.name = input.name;
+              externalFields.name = input.name;
+            }
+
+            const rawAccount = input.account ?? input.accountId;
+            if (rawAccount !== undefined) {
+              const resolvedAcct = await resolveAccount(rawAccount, apiAdapter, resolved);
+              internalFields.account = resolvedAcct.id;
+              externalFields.account = resolvedAcct.id;
+            }
+
+            const rawPayee =
+              input.payee !== undefined ? input.payee : input.payeeId;
+            if (rawPayee !== undefined) {
+              if (rawPayee === null) {
+                internalFields.payee = null;
+                externalFields.payee = null;
+              } else {
+                const resolvedPayee = await resolvePayee(rawPayee, apiAdapter, resolved);
+                internalFields.payee = resolvedPayee.id;
+                externalFields.payee = resolvedPayee.id;
+              }
+            }
+
+            if (input.amount !== undefined) {
+              internalFields.amount = convertScheduleAmountToMinor(input.amount);
+              externalFields.amount = input.amount;
+            }
+            if (input.amountOp !== undefined) {
+              internalFields.amountOp = input.amountOp;
+              externalFields.amountOp = input.amountOp;
+            }
+            if (input.date !== undefined) {
+              internalFields.date = input.date;
+              externalFields.date = input.date;
+            }
+            const postsTx = input.postsTransaction ?? input.posts_transaction;
+            if (postsTx !== undefined) {
+              internalFields.posts_transaction = postsTx;
+              externalFields.posts_transaction = postsTx;
+            }
+
+            await apiAdapter.updateSchedule(
+              scheduleId,
+              internalFields,
+              input.resetNextDate,
+            );
+
+            return createResourceFacadeResponse({
+              message: `Updated schedule ${scheduleId}`,
+              data: {
+                id: scheduleId,
+                ...externalFields,
+              },
+              resolved,
+            });
+          });
+        }
+
+        if (input.action === 'delete') {
+          const scheduleRef = input.id ?? input.scheduleId ?? input.name;
+          if (!scheduleRef) {
+            throw new Error(
+              'id, scheduleId, or name is required when deleting a schedule',
+            );
+          }
+
+          return executeWrite(async (apiAdapter) => {
+            if (!apiAdapter.deleteSchedule) {
+              throw new Error('deleteSchedule is not supported by the current API adapter');
+            }
+            const resolvedSched = await resolveSchedule(scheduleRef, apiAdapter, resolved);
+            await apiAdapter.deleteSchedule(resolvedSched.id);
+
+            return createResourceFacadeResponse({
+              message: `Deleted schedule ${resolvedSched.id}`,
+              data: { id: resolvedSched.id },
+              resolved,
+            });
+          });
+        }
+
+        if (input.action === 'preview_dates') {
+          return executeRead(
+            async (apiAdapter) => {
+              if (!apiAdapter.getScheduleDates) {
+                throw new Error(
+                  'getScheduleDates is not supported by the current API adapter',
+                );
+              }
+
+              let dateConfig = input.date;
+              let resolvedScheduleId: string | undefined;
+              const scheduleRef = input.id ?? input.scheduleId ?? input.name;
+
+              if (scheduleRef) {
+                const resolvedSched = await resolveSchedule(
+                  scheduleRef,
+                  apiAdapter,
+                  resolved,
+                );
+                resolvedScheduleId = resolvedSched.id;
+                if (!dateConfig) {
+                  if (!apiAdapter.getSchedules) {
+                    throw new Error(
+                      'getSchedules is not supported by the current API adapter',
+                    );
+                  }
+                  const rawSchedules = await apiAdapter.getSchedules();
+                  const sched = (rawSchedules ?? []).find(
+                    (s) => s.id === resolvedScheduleId,
+                  );
+                  if (!sched) {
+                    throw new Error(`Schedule "${resolvedScheduleId}" not found`);
+                  }
+                  dateConfig = sched.date ?? sched._date;
+                }
+              }
+
+              if (!dateConfig) {
+                throw new Error(
+                  'Either an existing schedule (id, scheduleId, or name) or date configuration must be provided for preview_dates',
+                );
+              }
+
+              const dateOptions: { start?: string; end?: string; count?: number } = {};
+              dateOptions.start =
+                input.start ?? new Date(now()).toISOString().slice(0, 10);
+              if (input.end) {
+                dateOptions.end = input.end;
+              }
+              if (input.count !== undefined) {
+                dateOptions.count = Math.min(Math.max(input.count, 1), 100);
+              } else if (!input.end) {
+                dateOptions.count = 10;
+              }
+
+              const dates = await apiAdapter.getScheduleDates(dateConfig, dateOptions);
+
+              return createResourceFacadeResponse({
+                message: `Calculated ${dates.length} upcoming schedule date(s)`,
+                data: {
+                  ...(resolvedScheduleId ? { scheduleId: resolvedScheduleId } : {}),
+                  dates,
+                },
+                resolved,
+              });
+            },
+            input.forceSync !== undefined ? { forceSync: input.forceSync } : undefined,
+          );
+        }
+      }
+
+      if (input.target === 'rule') {
+        if (input.action === 'create') {
+          if (!input.conditions || input.conditions.length === 0) {
+            throw new Error('conditions are required when creating a rule');
+          }
+          if (!input.actions || input.actions.length === 0) {
+            throw new Error('actions are required when creating a rule');
+          }
+
+          return executeWrite(async (apiAdapter) => {
+            if (!apiAdapter.createRule) {
+              throw new Error('createRule is not supported by the current API adapter');
+            }
+            const resolvedConditions = await resolveRuleConditionsEntities(
+              input.conditions!,
+              apiAdapter,
+              resolved,
+            );
+            const resolvedActions = await resolveRuleActionsEntities(
+              input.actions!,
+              apiAdapter,
+              resolved,
+            );
+
+            const payload = {
+              stage: input.stage !== undefined ? input.stage : 'pre',
+              conditionsOp: input.conditionsOp ?? 'and',
+              conditions: convertRuleConditionsToInternal(resolvedConditions),
+              actions: convertRuleActionsToInternal(resolvedActions),
+            };
+            const created = await apiAdapter.createRule(payload);
+            const summary = formatRuleSummary(created);
+
+            return createResourceFacadeResponse({
+              message: `Created automation rule ${summary.id}`,
+              data: summary,
+              resolved,
+            });
+          });
+        }
+
+        if (input.action === 'update') {
+          if (!input.id) {
+            throw new Error('id is required when updating a rule');
+          }
+          if (!input.conditions || input.conditions.length === 0) {
+            throw new Error('conditions are required when updating a rule');
+          }
+          if (!input.actions || input.actions.length === 0) {
+            throw new Error('actions are required when updating a rule');
+          }
+
+          return executeWrite(async (apiAdapter) => {
+            if (!apiAdapter.updateRule) {
+              throw new Error('updateRule is not supported by the current API adapter');
+            }
+            const resolvedConditions = await resolveRuleConditionsEntities(
+              input.conditions!,
+              apiAdapter,
+              resolved,
+            );
+            const resolvedActions = await resolveRuleActionsEntities(
+              input.actions!,
+              apiAdapter,
+              resolved,
+            );
+
+            const payload = {
+              id: input.id!,
+              stage: input.stage !== undefined ? input.stage : 'pre',
+              conditionsOp: input.conditionsOp ?? 'and',
+              conditions: convertRuleConditionsToInternal(resolvedConditions),
+              actions: convertRuleActionsToInternal(resolvedActions),
+            };
+            const updated = await apiAdapter.updateRule(payload);
+            const summary = formatRuleSummary(updated);
+
+            return createResourceFacadeResponse({
+              message: `Updated automation rule ${summary.id}`,
+              data: summary,
+              resolved,
+            });
+          });
+        }
+
+        if (input.action === 'delete') {
+          if (!input.id) {
+            throw new Error('id is required when deleting a rule');
+          }
+
+          return executeWrite(async (apiAdapter) => {
+            if (!apiAdapter.deleteRule) {
+              throw new Error('deleteRule is not supported by the current API adapter');
+            }
+            await apiAdapter.deleteRule(input.id!);
+
+            return createResourceFacadeResponse({
+              message: `Deleted automation rule ${input.id}`,
+              data: { id: input.id },
+              resolved,
+            });
+          });
+        }
+      }
+
+      throw new Error(
+        `Unsupported automation target/action combination: ${input.target}/${input.action}`,
+      );
     },
   };
 }

@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: In-Process Identifier Resolution & Standardized Response Envelope
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Exposes a `manage_accounts` tool on the MCP server with a discriminated `action` schema supporting `create`, `update`, `close`, and `reopen`.
 - [x] Accepts initial balance as a Decimal Amount during account creation.

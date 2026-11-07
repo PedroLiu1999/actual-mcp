@@ -86,7 +86,7 @@ describe('Packaging & deployment artifacts', () => {
     expect(compose).toContain('http://127.0.0.1:3000/healthz');
   });
 
-  it('documents architecture, all 30 MCP tools, all environment variables, VPS deployment (actual-server + cloudflared), and Google Gemini connection steps in README.md', () => {
+  it('documents architecture, all 20 consolidated MCP tools, all environment variables, VPS deployment (actual-server + cloudflared), and Google Gemini connection steps in README.md', () => {
     const readmePath = path.join(repoRoot, 'README.md');
     const readme = fs.readFileSync(readmePath, 'utf8');
 
@@ -99,42 +99,23 @@ describe('Packaging & deployment artifacts', () => {
       'list_payees',
       'list_budget_months',
       'get_budget_month',
-      'create_transactions',
-      'update_transaction',
-      'delete_transaction',
+      'list_schedules',
+      'list_rules',
+      'manage_transactions',
+      'manage_categories',
+      'manage_payees',
+      'manage_accounts',
+      'manage_automations',
       'set_budget_amount',
-      'create_category',
-      'update_category',
-      'delete_category',
-      'create_category_group',
-      'update_category_group',
-      'delete_category_group',
-      'create_payee',
-      'update_payee',
-      'delete_payee',
-      'merge_payees',
-      'create_account',
-      'update_account',
-      'close_account',
-      'reopen_account',
       'run_bank_sync',
       'set_budget_carryover',
       'hold_budget_for_next_month',
       'reset_budget_hold',
-      'list_schedules',
-      'get_schedule_upcoming_dates',
-      'create_schedule',
-      'update_schedule',
-      'delete_schedule',
-      'list_rules',
-      'create_rule',
-      'update_rule',
-      'delete_rule',
     ];
     for (const tool of expectedTools) {
       expect(readme).toContain(tool);
     }
-    expect(readme).toContain('all 39 MCP tools');
+    expect(readme).toContain('20 MCP tools');
 
     const expectedEnvVars = [
       'PUBLIC_URL',

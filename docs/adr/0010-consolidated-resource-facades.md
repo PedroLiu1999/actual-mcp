@@ -26,7 +26,7 @@ All five facades accept either human-readable names or UUIDs, resolve them in-pr
 
 ## Consequences
 
-- Public MCP tool count decreases from 39 to 16 tools, cutting caller context overhead by ~65%.
+- Public MCP tool count decreases from 39 to 20 tools, cutting caller context overhead significantly.
 - Transaction categorization and multi-item edits execute in a single roundtrip without prerequisite ID lookup queries.
 - Tests and callers exercise deep operations directly across the `BudgetGateway` interface seam.
 - Destructive actions (`delete`, `close`) require `transferTo` targets (accepting names or UUIDs) when non-empty, preventing orphaned budget entities.

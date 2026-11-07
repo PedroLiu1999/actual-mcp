@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Resolves category and group names to internal UUIDs against the local Budget Cache case-insensitively.
 - [x] Resolves payee and account names to internal UUIDs against the local Budget Cache case-insensitively.

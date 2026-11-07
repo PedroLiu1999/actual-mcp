@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 
 # Specification: Consolidated Deep Resource Facades for Agent Ergonomics
 
@@ -22,11 +22,11 @@ Consolidate the 24 shallow write CRUD tools into five deep, high-leverage Resour
 4. `manage_automations`: Consolidates schedules and rules lifecycle (`create`, `update`, `delete`, `preview_dates`) discriminated by target type (`schedule` or `rule`).
 5. `manage_transactions`: Consolidates transaction lifecycle (`create`, `update`, `delete`) with batch creation (1–50 transactions), bulk updates (updating fields across multiple transaction IDs in one turn), and multi-transaction deletions.
 
-All five facades accept either human-readable names or internal UUIDs, resolving them in-process against the local Budget Cache without extra network or tool roundtrips. When resolution fails, the facades return structured repair suggestions containing the closest matching names. The public tool catalog shrinks from 39 to 16 tools, reducing context load by over 60% while preserving every underlying capability.
+All five facades accept either human-readable names or internal UUIDs, resolving them in-process against the local Budget Cache without extra network or tool roundtrips. When resolution fails, the facades return structured repair suggestions containing the closest matching names. The public tool catalog shrinks from 39 to 20 tools, reducing context load while preserving every underlying capability.
 
 ## User Stories
 
-1. As an AI agent, I want a concise public tool catalog of 16 tools instead of 39, so that my context window overhead is reduced by over 60% on every turn.
+1. As an AI agent, I want a concise public tool catalog of 20 tools instead of 39, so that my context window overhead is reduced on every turn.
 2. As an AI agent, I want unified Resource Facades with a clear `action` parameter, so that I can select the appropriate resource management tool without tool selection ambiguity.
 3. As an AI agent, I want to create a new category by specifying its group name directly (e.g., `group: "Subscriptions"`), so that I do not need to query category groups first to find a group UUID.
 4. As an AI agent, I want missing category groups to be automatically created when I create a category with a new group name, so that I do not get blocked by missing parent entity errors.
@@ -93,7 +93,7 @@ All five facades accept either human-readable names or internal UUIDs, resolving
   - Verify safety guards: deleting categories/accounts with transactions without a transfer destination is rejected with actionable error messages.
   - Verify fuzzy match suggestions returned when an entity name is not found.
 - **MCP Tool Registration & Catalog Tests**:
-  - Verify the server exposes exactly the 16 active tools and none of the 24 retired shallow tools.
+  - Verify the server exposes exactly the 20 active tools and none of the 24 retired shallow tools.
   - Verify input schema validation and error responses for invalid action parameters.
   - Verify standardized result envelope structure and MCP metadata annotations (`destructiveHint`, `readOnlyHint`).
 - **Prior Art**:

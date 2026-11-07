@@ -1,4 +1,5 @@
 import type { AqlQueryResult, StructuredAqlQueryInput } from './aql.js';
+import type { ResourceFacadeResult } from './resolver.js';
 
 export type {
   AqlQueryResult,
@@ -7,6 +8,15 @@ export type {
   ParsedStructuredAqlQuery,
   StructuredAqlQueryInput,
 } from './aql.js';
+export type {
+  BudgetCacheSource,
+  ResolvableCandidate,
+  ResolvableEntityType,
+  ResolvedEntity,
+  ResolveEntityOptions,
+  ResourceFacadeErrorResult,
+  ResourceFacadeResult,
+} from './resolver.js';
 
 export type AccountType =
   | 'checking'
@@ -16,6 +26,23 @@ export type AccountType =
   | 'mortgage'
   | 'debt'
   | 'other';
+
+export type ManageAccountAction = 'create' | 'update' | 'close' | 'reopen';
+
+export interface ManageAccountsInput {
+  action: ManageAccountAction;
+  id?: string;
+  name?: string;
+  account?: string;
+  newName?: string;
+  type?: AccountType;
+  offbudget?: boolean;
+  initialBalance?: number;
+  transferTo?: string;
+  transferAccountId?: string;
+  transferCategory?: string;
+  transferCategoryId?: string;
+}
 
 export interface AccountSummary {
   id: string;
@@ -169,6 +196,57 @@ export interface DeleteTransactionResult {
   deleted: TransactionRecord;
 }
 
+export interface ManageTransactionCreateItemInput {
+  date: string;
+  /** Transaction amount expressed as a Decimal Amount (negative for Outflow, positive for Inflow). */
+  amount: number;
+  payee?: string;
+  payeeName?: string;
+  payeeId?: string;
+  category?: string;
+  categoryId?: string;
+  notes?: string;
+  cleared?: boolean;
+  importedId?: string;
+}
+
+export interface ManageTransactionsCreateInput {
+  action: 'create';
+  account?: string;
+  accountId?: string;
+  transactions: ManageTransactionCreateItemInput[];
+  runRules?: boolean;
+}
+
+export interface ManageTransactionsUpdateInput {
+  action: 'update';
+  id?: string;
+  ids?: string[];
+  account?: string;
+  accountId?: string;
+  date?: string;
+  /** Transaction amount expressed as a Decimal Amount (negative for Outflow, positive for Inflow). */
+  amount?: number;
+  payee?: string | null;
+  payeeId?: string | null;
+  payeeName?: string | null;
+  category?: string | null;
+  categoryId?: string | null;
+  notes?: string | null;
+  cleared?: boolean;
+}
+
+export interface ManageTransactionsDeleteInput {
+  action: 'delete';
+  id?: string;
+  ids?: string[];
+}
+
+export type ManageTransactionsInput =
+  | ManageTransactionsCreateInput
+  | ManageTransactionsUpdateInput
+  | ManageTransactionsDeleteInput;
+
 export interface SetBudgetAmountInput {
   month: string;
   categoryId: string;
@@ -289,6 +367,23 @@ export interface DeleteCategoryGroupResult {
   success: boolean;
 }
 
+export type ManageCategoriesAction = 'create' | 'update' | 'delete' | 'move';
+export type ManageCategoriesTarget = 'category' | 'group';
+
+export interface ManageCategoriesInput {
+  action: ManageCategoriesAction;
+  target?: ManageCategoriesTarget;
+  id?: string;
+  name?: string;
+  newName?: string;
+  group?: string;
+  groupId?: string;
+  isIncome?: boolean;
+  hidden?: boolean;
+  transferTo?: string;
+  transferCategoryId?: string;
+}
+
 export interface CreatePayeeInput {
   name: string;
 }
@@ -312,6 +407,32 @@ export interface DeletePayeeResult {
 export interface MergePayeesResult {
   targetId: string;
   mergedCount: number;
+}
+
+export type ManagePayeesAction = 'create' | 'update' | 'delete' | 'merge';
+
+export interface ManagePayeesInput {
+  action: ManagePayeesAction;
+  /** Payee ID or name for update/delete (or target in merge). */
+  id?: string;
+  /** Payee name for create, target payee name/ID for update/delete, or new name when id/payee is supplied in update. */
+  name?: string;
+  /** Alias for payee name or ID in create/update/delete. */
+  payee?: string;
+  /** Explicit new payee name when action is 'update'. */
+  newName?: string;
+  /** Target payee name or UUID to keep when action is 'merge'. */
+  target?: string;
+  /** Target payee name or UUID to keep when action is 'merge'. */
+  targetId?: string;
+  /** Alias for target payee name or UUID when action is 'merge'. */
+  targetPayeeId?: string;
+  /** Array of duplicate payee names or UUIDs to merge into target when action is 'merge'. */
+  merge?: string[];
+  /** Array of duplicate payee names or UUIDs to merge into target when action is 'merge'. */
+  mergeIds?: string[];
+  /** Alias for array of duplicate payee names or UUIDs when action is 'merge'. */
+  sourcePayeeIds?: string[];
 }
 
 export interface RunBankSyncResult {
@@ -413,6 +534,37 @@ export interface UpdateRuleInput {
   actions: RuleAction[];
 }
 
+export type AutomationTarget = 'schedule' | 'rule';
+
+export type AutomationAction = 'create' | 'update' | 'delete' | 'preview_dates';
+
+export interface ManageAutomationsInput {
+  target: AutomationTarget;
+  action: AutomationAction;
+  id?: string;
+  scheduleId?: string;
+  name?: string;
+  account?: string;
+  accountId?: string;
+  payee?: string | null;
+  payeeId?: string | null;
+  /** Decimal Amount */
+  amount?: ScheduleAmount;
+  amountOp?: ScheduleAmountOp;
+  date?: unknown;
+  postsTransaction?: boolean;
+  posts_transaction?: boolean;
+  resetNextDate?: boolean;
+  start?: string;
+  end?: string;
+  count?: number;
+  forceSync?: boolean;
+  stage?: 'pre' | 'post' | 'default' | null;
+  conditionsOp?: 'and' | 'or';
+  conditions?: RuleCondition[];
+  actions?: RuleAction[];
+}
+
 export interface BudgetGateway {
   getReadiness(): BudgetReadiness;
   listAccounts(options?: { forceSync?: boolean }): Promise<AccountSummary[]>;
@@ -429,6 +581,7 @@ export interface BudgetGateway {
   createTransactions?(input: CreateTransactionsInput): Promise<CreateTransactionsResult>;
   updateTransaction?(input: UpdateTransactionInput): Promise<UpdateTransactionResult>;
   deleteTransaction?(id: string): Promise<DeleteTransactionResult>;
+  manageTransactions?(input: ManageTransactionsInput): Promise<ResourceFacadeResult<unknown>>;
   setBudgetAmount?(input: SetBudgetAmountInput): Promise<SetBudgetAmountResult>;
   createCategory?(input: CreateCategoryInput): Promise<CreateCategoryResult>;
   updateCategory?(input: UpdateCategoryInput): Promise<UpdateCategoryResult>;
@@ -436,6 +589,7 @@ export interface BudgetGateway {
   createCategoryGroup?(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult>;
   updateCategoryGroup?(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult>;
   deleteCategoryGroup?(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult>;
+  manageCategories?(input: ManageCategoriesInput): Promise<ResourceFacadeResult<unknown>>;
   setBudgetCarryover?(
     month: string,
     categoryId: string,
@@ -447,6 +601,7 @@ export interface BudgetGateway {
   updatePayee?(id: string, fields: { name?: string }): Promise<{ id: string }>;
   deletePayee?(id: string): Promise<{ id: string }>;
   mergePayees?(targetId: string, mergeIds: string[]): Promise<{ targetId: string; mergedCount: number }>;
+  managePayees?(input: ManagePayeesInput): Promise<ResourceFacadeResult<unknown>>;
   createAccount?(
     account: { name: string; type: AccountType; offbudget?: boolean },
     initialBalance?: number,
@@ -461,6 +616,7 @@ export interface BudgetGateway {
     transferCategoryId?: string,
   ): Promise<{ id: string }>;
   reopenAccount?(id: string): Promise<{ id: string }>;
+  manageAccounts?(input: ManageAccountsInput): Promise<ResourceFacadeResult<unknown>>;
   runBankSync?(accountId?: string): Promise<RunBankSyncResult>;
   listSchedules?(options?: { forceSync?: boolean }): Promise<ScheduleSummary[]>;
   getScheduleDates?(input: GetScheduleDatesInput): Promise<string[]>;
@@ -475,6 +631,7 @@ export interface BudgetGateway {
   createRule?(input: CreateRuleInput): Promise<RuleSummary>;
   updateRule?(input: UpdateRuleInput): Promise<RuleSummary>;
   deleteRule?(id: string): Promise<{ id: string }>;
+  manageAutomations?(input: ManageAutomationsInput): Promise<ResourceFacadeResult<unknown>>;
   initialize?(): Promise<void>;
   sync?(): Promise<void>;
   shutdown?(): Promise<void>;

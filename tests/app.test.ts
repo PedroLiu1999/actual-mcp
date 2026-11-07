@@ -200,7 +200,7 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
     expect(res.body.result.instructions).toEqual(expect.any(String));
   });
 
-  it('exposes list_accounts with readOnlyHint: true and destructiveHint: false on tools/list', async () => {
+  it('exposes the consolidated 20-tool catalog on tools/list and none of the 24 retired shallow CRUD tools', async () => {
     const app = createApp({ config: testConfig, budgetGateway: createStubGateway() });
     const token = await issueBearerToken(app);
 
@@ -218,10 +218,71 @@ describe('HTTP application seam — stateless Streamable HTTP /mcp & list_accoun
       });
 
     expect(res.status).toBe(200);
-    const tools = res.body.result.tools;
-    const listAccountsTool = tools.find((t: { name: string }) => t.name === 'list_accounts');
+    const tools = res.body.result.tools as Array<{
+      name: string;
+      annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
+    }>;
+
+    const activeToolNames = tools.map((t) => t.name).sort();
+    expect(activeToolNames).toEqual(
+      [
+        'get_budget_month',
+        'get_spending_summary',
+        'get_transactions',
+        'hold_budget_for_next_month',
+        'list_accounts',
+        'list_budget_months',
+        'list_categories',
+        'list_payees',
+        'list_rules',
+        'list_schedules',
+        'manage_accounts',
+        'manage_automations',
+        'manage_categories',
+        'manage_payees',
+        'manage_transactions',
+        'reset_budget_hold',
+        'run_aql_query',
+        'run_bank_sync',
+        'set_budget_amount',
+        'set_budget_carryover',
+      ].sort(),
+    );
+    expect(tools).toHaveLength(20);
+
+    const retiredTools = [
+      'create_category',
+      'update_category',
+      'delete_category',
+      'create_category_group',
+      'update_category_group',
+      'delete_category_group',
+      'create_payee',
+      'update_payee',
+      'delete_payee',
+      'merge_payees',
+      'create_account',
+      'update_account',
+      'close_account',
+      'reopen_account',
+      'create_schedule',
+      'update_schedule',
+      'delete_schedule',
+      'get_schedule_upcoming_dates',
+      'create_rule',
+      'update_rule',
+      'delete_rule',
+      'create_transactions',
+      'update_transaction',
+      'delete_transaction',
+    ];
+    for (const retired of retiredTools) {
+      expect(tools.find((t) => t.name === retired)).toBeUndefined();
+    }
+
+    const listAccountsTool = tools.find((t) => t.name === 'list_accounts');
     expect(listAccountsTool).toBeDefined();
-    expect(listAccountsTool.annotations).toMatchObject({
+    expect(listAccountsTool?.annotations).toMatchObject({
       readOnlyHint: true,
       destructiveHint: false,
     });

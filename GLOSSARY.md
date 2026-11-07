@@ -74,6 +74,10 @@ _Avoid_: Trigger, automation script, webhook
 
 ### Access & Transport
 
+**Resource Facade**:
+An MCP tool that consolidates entity lifecycle operations (create, update, delete, merge, move) for a domain entity cluster behind a single discriminated action interface with in-process identifier resolution.
+_Avoid_: CRUD tool, sub-resource endpoint, mutation router
+
 **Embedded OAuth Server**:
 The built-in single-tenant OAuth 2.1 Authorization and Resource Server running inside `actual-mcp` that authenticates MCP clients via PKCE, RFC 7591 dynamic client registration (`/register`), on-the-fly dynamic client IDs, an explicit redirect URI allowlist, and an admin consent passphrase.
 _Avoid_: External IdP, OAuth proxy

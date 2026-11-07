@@ -6,7 +6,8 @@ import {
   structuredAqlQueryInputSchema,
   structuredAqlQueryObjectSchema,
 } from '../gateway/aql.js';
-import type { BudgetGateway } from '../gateway/types.js';
+import { createResourceFacadeErrorResponse } from '../gateway/resolver.js';
+import type { BudgetGateway, ManageTransactionsInput } from '../gateway/types.js';
 
 const isoDateSchema = z
   .string()
@@ -20,6 +21,35 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
   return Object.fromEntries(
     Object.entries(obj).filter(([, value]) => value !== undefined),
   ) as T;
+}
+
+async function executeResourceFacadeTool(
+  operation: () => Promise<unknown>,
+): Promise<{
+  isError?: boolean;
+  content: Array<{ type: 'text'; text: string }>;
+}> {
+  try {
+    const result = await operation();
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      isError: true,
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(createResourceFacadeErrorResponse(error), null, 2),
+        },
+      ],
+    };
+  }
 }
 
 const scheduleAmountSchema = z.union([
@@ -459,7 +489,7 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     },
   );
 
-  const createTransactionItemSchema = z.object({
+  const manageTransactionItemSchema = z.object({
     date: isoDateSchema.describe('Transaction date in YYYY-MM-DD format.'),
     amount: z
       .number()
@@ -467,6 +497,10 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
       .describe(
         'Transaction amount as a Decimal Amount (negative for Outflow/expense e.g. -12.34, positive for Inflow/income e.g. 100.00).',
       ),
+    payee: z
+      .string()
+      .optional()
+      .describe('Payee name or UUID to match or create.'),
     payeeName: z
       .string()
       .optional()
@@ -475,6 +509,10 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
       .string()
       .optional()
       .describe('Existing payee UUID to assign to the transaction.'),
+    category: z
+      .string()
+      .optional()
+      .describe('Category name or UUID to assign to the transaction.'),
     categoryId: z
       .string()
       .optional()
@@ -491,145 +529,156 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
   });
 
   server.registerTool(
-    'create_transactions',
+    'manage_transactions',
     {
-      title: 'Create Transactions',
+      title: 'Manage Transactions',
       description:
-        'Create 1 to 50 transactions in an account using Decimal Amounts. Uses importTransactions by default (runRules: true) so payee matching and Actual categorization rules run automatically, or addTransactions when runRules is false.',
+        'Consolidated Resource Facade for transaction lifecycle operations (action: "create" | "update" | "delete"). Supports batch creation (1-50 items with Decimal Amounts, in-process account/category/payee name resolution, and runRules default true), single or bulk updates across 1-50 transaction IDs with automatic creation of new payees, and single or bulk deletions.',
       inputSchema: {
-        accountId: z.string().min(1).describe('Target account UUID.'),
+        action: z
+          .enum(['create', 'update', 'delete'])
+          .describe('Transaction lifecycle operation to perform.'),
+        account: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target account name or UUID (for action: "create" or "update").'),
+        accountId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target account UUID or name (for action: "create" or "update").'),
         transactions: z
-          .array(createTransactionItemSchema)
+          .array(manageTransactionItemSchema)
           .min(1, 'At least 1 transaction is required')
           .max(50, 'At most 50 transactions can be created per call')
-          .describe('Batch of 1 to 50 transactions to create.'),
+          .optional()
+          .describe('Batch of 1 to 50 transactions to create (for action: "create").'),
         runRules: z
           .boolean()
           .optional()
-          .default(true)
           .describe(
-            'When true (default), uses importTransactions to match/create payees and run Actual rules; when false, uses raw addTransactions.',
+            'When true (default for action: "create"), uses importTransactions to match/create payees and run Actual rules; when false, uses addTransactions.',
           ),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async ({ accountId, transactions, runRules }) => {
-      if (!budgetGateway.createTransactions) {
-        throw new Error(
-          'createTransactions is not supported by the configured BudgetGateway',
-        );
-      }
-      const normalizedTransactions = transactions.map((item) => stripUndefined(item));
-      const result = await budgetGateway.createTransactions({
-        accountId,
-        transactions: normalizedTransactions,
-        runRules: runRules ?? true,
-      });
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'update_transaction',
-    {
-      title: 'Update Transaction',
-      description:
-        'Update an existing transaction by ID (date, amount in Decimal Amount, payeeId, categoryId, notes, cleared) and return both { previous, updated } records in Decimal Amounts for verification or immediate reversal.',
-      inputSchema: {
-        id: z.string().min(1).describe('Target transaction UUID to update.'),
+        id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Single target transaction UUID (for action: "update" or "delete").'),
+        ids: z
+          .array(z.string().min(1))
+          .min(1, 'At least 1 transaction ID is required')
+          .max(50, 'At most 50 transaction IDs can be processed per call')
+          .optional()
+          .describe('Batch of 1 to 50 transaction UUIDs (for action: "update" or "delete").'),
         date: isoDateSchema
           .optional()
-          .describe('New transaction date in YYYY-MM-DD format.'),
+          .describe('New transaction date in YYYY-MM-DD format (for action: "update").'),
         amount: z
           .number()
           .finite()
           .optional()
           .describe(
-            'New transaction amount as a Decimal Amount (negative for Outflow, positive for Inflow).',
+            'New transaction amount as a Decimal Amount (negative for Outflow, positive for Inflow) (for action: "update").',
+          ),
+        payee: z
+          .string()
+          .nullable()
+          .optional()
+          .describe(
+            'New payee name or UUID (auto-created if name does not exist), or null to clear (for action: "update").',
           ),
         payeeId: z
           .string()
           .nullable()
           .optional()
-          .describe('New payee UUID (or null to clear).'),
+          .describe('New payee UUID or name, or null to clear (for action: "update").'),
+        payeeName: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('New payee name, or null to clear (for action: "update").'),
+        category: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('New category name or UUID, or null to clear (for action: "update").'),
         categoryId: z
           .string()
           .nullable()
           .optional()
-          .describe('New category UUID (or null to clear).'),
+          .describe('New category UUID or name, or null to clear (for action: "update").'),
         notes: z
           .string()
           .nullable()
           .optional()
-          .describe('New transaction notes (or null to clear).'),
+          .describe('New transaction notes, or null to clear (for action: "update").'),
         cleared: z
           .boolean()
           .optional()
-          .describe('New cleared status.'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.updateTransaction) {
-        throw new Error(
-          'updateTransaction is not supported by the configured BudgetGateway',
-        );
-      }
-      const normalizedInput = stripUndefined(args);
-      const result = await budgetGateway.updateTransaction(normalizedInput);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'delete_transaction',
-    {
-      title: 'Delete Transaction',
-      description:
-        'Delete an existing transaction by ID and return { deleted } containing the full pre-deletion transaction record in Decimal Amounts so it can be recreated if needed.',
-      inputSchema: {
-        id: z.string().min(1).describe('Target transaction UUID to delete.'),
+          .describe('New cleared status (for action: "update").'),
       },
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
       },
     },
-    async ({ id }) => {
-      if (!budgetGateway.deleteTransaction) {
+    async (args) => {
+      if (!budgetGateway.manageTransactions) {
         throw new Error(
-          'deleteTransaction is not supported by the configured BudgetGateway',
+          'manageTransactions is not supported by the configured BudgetGateway',
         );
       }
-      const result = await budgetGateway.deleteTransaction(id);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
+
+      let normalizedInput: ManageTransactionsInput;
+      if (args.action === 'create') {
+        if (!args.account && !args.accountId) {
+          throw new Error('manage_transactions create requires account or accountId');
+        }
+        if (!args.transactions || args.transactions.length === 0) {
+          throw new Error('manage_transactions create requires a non-empty transactions array');
+        }
+        normalizedInput = stripUndefined({
+          action: 'create' as const,
+          account: args.account,
+          accountId: args.accountId,
+          transactions: args.transactions.map((item) => stripUndefined(item)),
+          runRules: args.runRules ?? true,
+        });
+      } else if (args.action === 'update') {
+        if (!args.id && (!args.ids || args.ids.length === 0)) {
+          throw new Error('manage_transactions update requires id or ids');
+        }
+        normalizedInput = stripUndefined({
+          action: 'update' as const,
+          id: args.id,
+          ids: args.ids,
+          account: args.account,
+          accountId: args.accountId,
+          date: args.date,
+          amount: args.amount,
+          payee: args.payee,
+          payeeId: args.payeeId,
+          payeeName: args.payeeName,
+          category: args.category,
+          categoryId: args.categoryId,
+          notes: args.notes,
+          cleared: args.cleared,
+        });
+      } else {
+        if (!args.id && (!args.ids || args.ids.length === 0)) {
+          throw new Error('manage_transactions delete requires id or ids');
+        }
+        normalizedInput = stripUndefined({
+          action: 'delete' as const,
+          id: args.id,
+          ids: args.ids,
+        });
+      }
+
+      return executeResourceFacadeTool(() =>
+        budgetGateway.manageTransactions!(normalizedInput),
+      );
     },
   );
 
@@ -695,108 +744,75 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
   );
 
   server.registerTool(
-    'create_category',
+    'manage_categories',
     {
-      title: 'Create Category',
+      title: 'Manage Categories',
       description:
-        'Create a new envelope category under an existing category group.',
+        'Deep Resource Facade for category and category group lifecycle operations (create, update, delete, move). Accepts human-readable names or UUIDs, resolves identifiers in-process against the Budget Cache, automatically creates missing category groups when creating or moving a category, and enforces safe transaction reassignment on deletion.',
       inputSchema: {
-        name: z.string().min(1).describe('Name of the new category.'),
-        groupId: z.string().min(1).describe('Parent category group ID.'),
-        isIncome: z
-          .boolean()
+        action: z
+          .enum(['create', 'update', 'delete', 'move'])
+          .describe(
+            "Lifecycle action to perform: 'create', 'update', 'delete', or 'move'.",
+          ),
+        target: z
+          .enum(['category', 'group'])
+          .default('category')
+          .describe("Target entity type: 'category' (default) or 'group'."),
+        id: z
+          .string()
+          .min(1)
           .optional()
-          .describe('Whether this category represents an income stream.'),
-        hidden: z
-          .boolean()
+          .describe(
+            'Target category or category group UUID or name (for update, delete, or move).',
+          ),
+        name: z
+          .string()
+          .min(1)
           .optional()
-          .describe('Whether the category should be hidden from active budget views.'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.createCategory) {
-        throw new Error(
-          'createCategory is not supported by the configured BudgetGateway',
-        );
-      }
-      const normalizedInput = stripUndefined(args);
-      const result = await budgetGateway.createCategory(normalizedInput);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'update_category',
-    {
-      title: 'Update Category',
-      description:
-        'Update an existing envelope category (rename, move to a different category group, or toggle income/hidden flags).',
-      inputSchema: {
-        id: z.string().min(1).describe('Target category ID to update.'),
-        name: z.string().min(1).optional().describe('New name for the category.'),
+          .describe(
+            'Category or category group name (required for create; can also identify target for update, delete, or move).',
+          ),
+        newName: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('New name when renaming a category or category group during update.'),
+        group: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Parent category group name or UUID (auto-created in-process if not found during category create or move).',
+          ),
         groupId: z
           .string()
           .min(1)
           .optional()
-          .describe('New parent category group ID to move the category into.'),
+          .describe('Parent category group UUID or name (alias for group).'),
         isIncome: z
           .boolean()
           .optional()
-          .describe('Whether this category represents an income stream.'),
+          .describe('Whether the category or category group represents an income stream.'),
         hidden: z
           .boolean()
           .optional()
-          .describe('Whether the category should be hidden from active budget views.'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.updateCategory) {
-        throw new Error(
-          'updateCategory is not supported by the configured BudgetGateway',
-        );
-      }
-      const normalizedInput = stripUndefined(args);
-      const result = await budgetGateway.updateCategory(normalizedInput);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'delete_category',
-    {
-      title: 'Delete Category',
-      description:
-        'Delete an existing envelope category. If the category has historical transactions, transferCategoryId must be provided to reassign them without orphaned records.',
-      inputSchema: {
-        id: z.string().min(1).describe('Target category ID to delete.'),
+          .describe(
+            'Whether the category or category group is hidden from active budget views.',
+          ),
+        transferTo: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Destination category name or UUID to reassign existing transactions to when deleting a non-empty category or group.',
+          ),
         transferCategoryId: z
           .string()
           .min(1)
           .optional()
           .describe(
-            'Destination category ID to safely reassign historical transactions to before deleting.',
+            'Destination category UUID or name for deletion reassignment (alias for transferTo).',
           ),
       },
       annotations: {
@@ -805,249 +821,86 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
       },
     },
     async (args) => {
-      if (!budgetGateway.deleteCategory) {
+      if (!budgetGateway.manageCategories) {
         throw new Error(
-          'deleteCategory is not supported by the configured BudgetGateway',
+          'manageCategories is not supported by the configured BudgetGateway',
         );
       }
       const normalizedInput = stripUndefined(args);
-      const result = await budgetGateway.deleteCategory(normalizedInput);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
+      return executeResourceFacadeTool(() =>
+        budgetGateway.manageCategories!(normalizedInput),
+      );
     },
   );
 
   server.registerTool(
-    'create_category_group',
+    'manage_payees',
     {
-      title: 'Create Category Group',
+      title: 'Manage Payees',
       description:
-        'Create a new category group to organize related expense or income envelopes.',
+        'Consolidated Resource Facade for payee lifecycle operations (create, update, delete, merge). Accepts human-readable payee names or internal UUIDs, resolves names in-process against the Budget Cache, and returns a standardized confirmation envelope.',
       inputSchema: {
-        name: z.string().min(1).describe('Name of the new category group.'),
-        isIncome: z
-          .boolean()
+        action: z
+          .enum(['create', 'update', 'delete', 'merge'])
+          .describe(
+            'Lifecycle action to perform on payees: "create", "update", "delete", or "merge".',
+          ),
+        id: z
+          .string()
+          .min(1)
           .optional()
-          .describe('Whether this group holds income categories.'),
-        hidden: z
-          .boolean()
-          .optional()
-          .describe('Whether the category group should be hidden.'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.createCategoryGroup) {
-        throw new Error(
-          'createCategoryGroup is not supported by the configured BudgetGateway',
-        );
-      }
-      const normalizedInput = stripUndefined(args);
-      const result = await budgetGateway.createCategoryGroup(normalizedInput);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'update_category_group',
-    {
-      title: 'Update Category Group',
-      description:
-        'Update an existing category group (rename or toggle income/hidden flags).',
-      inputSchema: {
-        id: z.string().min(1).describe('Target category group ID to update.'),
-        name: z.string().min(1).optional().describe('New name for the category group.'),
-        isIncome: z
-          .boolean()
-          .optional()
-          .describe('Whether this group holds income categories.'),
-        hidden: z
-          .boolean()
-          .optional()
-          .describe('Whether the category group should be hidden.'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.updateCategoryGroup) {
-        throw new Error(
-          'updateCategoryGroup is not supported by the configured BudgetGateway',
-        );
-      }
-      const normalizedInput = stripUndefined(args);
-      const result = await budgetGateway.updateCategoryGroup(normalizedInput);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'delete_category_group',
-    {
-      title: 'Delete Category Group',
-      description:
-        'Delete an existing category group. If any contained categories have transactions, transferCategoryId must be provided to reassign them without orphaned records.',
-      inputSchema: {
-        id: z.string().min(1).describe('Target category group ID to delete.'),
-        transferCategoryId: z
+          .describe('Target payee UUID or name (for update, delete, or merge target).'),
+        name: z
           .string()
           .min(1)
           .optional()
           .describe(
-            'Destination category ID to reassign transactions from member categories to before deleting the group.',
+            'Payee name to create, target payee name to update/delete, or new name when id/payee is supplied.',
           ),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: true,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.deleteCategoryGroup) {
-        throw new Error(
-          'deleteCategoryGroup is not supported by the configured BudgetGateway',
-        );
-      }
-      const normalizedInput = stripUndefined(args);
-      const result = await budgetGateway.deleteCategoryGroup(normalizedInput);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'create_payee',
-    {
-      title: 'Create Payee',
-      description: 'Create a new payee with a name string and return its generated ID.',
-      inputSchema: {
-        name: z.string().min(1).describe('Name of the new payee.'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.createPayee) {
-        throw new Error('createPayee is not supported by the configured BudgetGateway');
-      }
-      const result = await budgetGateway.createPayee({ name: args.name });
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'update_payee',
-    {
-      title: 'Update Payee',
-      description: 'Update an existing payee name.',
-      inputSchema: {
-        id: z.string().min(1).describe('Target payee ID to update.'),
-        name: z.string().min(1).describe('New name for the payee.'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.updatePayee) {
-        throw new Error('updatePayee is not supported by the configured BudgetGateway');
-      }
-      const result = await budgetGateway.updatePayee(args.id, { name: args.name });
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'delete_payee',
-    {
-      title: 'Delete Payee',
-      description: 'Delete an existing payee.',
-      inputSchema: {
-        id: z.string().min(1).describe('Target payee ID to delete.'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: true,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.deletePayee) {
-        throw new Error('deletePayee is not supported by the configured BudgetGateway');
-      }
-      const result = await budgetGateway.deletePayee(args.id);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'merge_payees',
-    {
-      title: 'Merge Payees',
-      description:
-        'Merge one or more duplicate source payees into a canonical target payee, consolidating all transactions and rules under the target payee and removing source records.',
-      inputSchema: {
-        targetPayeeId: z.string().min(1).describe('Canonical target payee ID to keep.'),
+        payee: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target payee name or UUID (alias for name/id).'),
+        newName: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('New name to assign when action is "update".'),
+        target: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target payee name or UUID to keep when action is "merge".'),
+        targetId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target payee UUID or name to keep when action is "merge".'),
+        targetPayeeId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Alias for targetId when action is "merge".'),
+        merge: z
+          .array(z.string().min(1))
+          .min(1)
+          .optional()
+          .describe(
+            'Array of duplicate source payee names or UUIDs to merge into the target payee and delete when action is "merge".',
+          ),
+        mergeIds: z
+          .array(z.string().min(1))
+          .min(1)
+          .optional()
+          .describe(
+            'Array of duplicate source payee UUIDs or names to merge into the target payee and delete when action is "merge".',
+          ),
         sourcePayeeIds: z
           .array(z.string().min(1))
           .min(1)
-          .describe(
-            'Non-empty array of source payee IDs to merge into target and delete.',
-          ),
+          .optional()
+          .describe('Alias for mergeIds when action is "merge".'),
       },
       annotations: {
         readOnlyHint: false,
@@ -1055,32 +908,52 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
       },
     },
     async (args) => {
-      if (!budgetGateway.mergePayees) {
-        throw new Error('mergePayees is not supported by the configured BudgetGateway');
+      if (!budgetGateway.managePayees) {
+        throw new Error(
+          'managePayees is not supported by the configured BudgetGateway',
+        );
       }
-      const result = await budgetGateway.mergePayees(
-        args.targetPayeeId,
-        args.sourcePayeeIds,
+      const normalizedInput = stripUndefined(args);
+      return executeResourceFacadeTool(() =>
+        budgetGateway.managePayees!(normalizedInput),
       );
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
     },
   );
 
   server.registerTool(
-    'create_account',
+    'manage_accounts',
     {
-      title: 'Create Account',
+      title: 'Manage Accounts',
       description:
-        'Create a new on-budget or off-budget account with a specified type and optional initial balance as a Decimal Amount.',
+        'Unified Resource Facade for account lifecycle management (create, update, close, reopen). Accepts human-readable names or UUIDs for accounts and transfer categories, and enforces safe balance transfer on closure.',
       inputSchema: {
-        name: z.string().min(1).describe('Name of the account.'),
+        action: z
+          .enum(['create', 'update', 'close', 'reopen'])
+          .describe(
+            'Account lifecycle operation to perform: "create", "update", "close", or "reopen".',
+          ),
+        id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target account UUID or human-readable name (for update, close, reopen).'),
+        name: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Account name (new account name for create, target account name or updated name for update, or target account name for close/reopen).',
+          ),
+        account: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Alias for target account name or UUID.'),
+        newName: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('New account name when renaming an existing account via action: "update".'),
         type: z
           .enum([
             'checking',
@@ -1091,110 +964,45 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
             'debt',
             'other',
           ])
-          .describe('Type of financial account.'),
+          .optional()
+          .describe('Type of financial account for action: "create" (default: "checking").'),
         offbudget: z
           .boolean()
           .optional()
-          .describe('Whether the account is off-budget.'),
+          .describe('Whether the account is off-budget (for create or update).'),
         initialBalance: z
           .number()
           .finite()
           .optional()
-          .describe('Optional initial balance expressed as a Decimal Amount (e.g. 1500.50).'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.createAccount) {
-        throw new Error(
-          'createAccount is not supported by the configured BudgetGateway',
-        );
-      }
-      const { name, type, offbudget, initialBalance } = args;
-      const accountInput: { name: string; type: typeof type; offbudget?: boolean } = {
-        name,
-        type,
-      };
-      if (offbudget !== undefined) {
-        accountInput.offbudget = offbudget;
-      }
-      const result = await budgetGateway.createAccount(
-        accountInput,
-        initialBalance,
-      );
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'update_account',
-    {
-      title: 'Update Account',
-      description:
-        'Update an existing account name or toggle its off-budget status.',
-      inputSchema: {
-        id: z.string().min(1).describe('ID of the account to update.'),
-        name: z.string().min(1).optional().describe('New name for the account.'),
-        offbudget: z
-          .boolean()
+          .describe('Optional initial balance as a Decimal Amount for action: "create".'),
+        transferTo: z
+          .string()
+          .min(1)
           .optional()
-          .describe('Whether the account is off-budget.'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.updateAccount) {
-        throw new Error(
-          'updateAccount is not supported by the configured BudgetGateway',
-        );
-      }
-      const { id, name, offbudget } = args;
-      const fields: { name?: string; offbudget?: boolean } = {};
-      if (name !== undefined) fields.name = name;
-      if (offbudget !== undefined) fields.offbudget = offbudget;
-      const result = await budgetGateway.updateAccount(id, fields);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'close_account',
-    {
-      title: 'Close Account',
-      description:
-        'Close an account in the Target Budget, optionally transferring remaining balance to another account and category.',
-      inputSchema: {
-        id: z.string().min(1).describe('ID of the account to close.'),
+          .describe(
+            'Destination account name or UUID to transfer remaining balance to on action: "close".',
+          ),
         transferAccountId: z
           .string()
           .min(1)
           .optional()
-          .describe('Target account ID to transfer remaining balance to.'),
+          .describe(
+            'Alias for transferTo: destination account UUID or name on action: "close".',
+          ),
+        transferCategory: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Destination category name or UUID for balance transfer across budget boundaries on action: "close".',
+          ),
         transferCategoryId: z
           .string()
           .min(1)
           .optional()
-          .describe('Category ID for balance transfer if transferring across budget boundary.'),
+          .describe(
+            'Alias for transferCategory: destination category UUID or name on action: "close".',
+          ),
       },
       annotations: {
         readOnlyHint: false,
@@ -1202,57 +1010,15 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
       },
     },
     async (args) => {
-      if (!budgetGateway.closeAccount) {
+      if (!budgetGateway.manageAccounts) {
         throw new Error(
-          'closeAccount is not supported by the configured BudgetGateway',
+          'manageAccounts is not supported by the configured BudgetGateway',
         );
       }
-      const { id, transferAccountId, transferCategoryId } = args;
-      const result = await budgetGateway.closeAccount(
-        id,
-        transferAccountId,
-        transferCategoryId,
+      const normalizedInput = stripUndefined(args);
+      return executeResourceFacadeTool(() =>
+        budgetGateway.manageAccounts!(normalizedInput),
       );
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'reopen_account',
-    {
-      title: 'Reopen Account',
-      description: 'Reopen a previously closed account.',
-      inputSchema: {
-        id: z.string().min(1).describe('ID of the account to reopen.'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.reopenAccount) {
-        throw new Error(
-          'reopenAccount is not supported by the configured BudgetGateway',
-        );
-      }
-      const { id } = args;
-      const result = await budgetGateway.reopenAccount(id);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
     },
   );
 
@@ -1448,208 +1214,6 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
   );
 
   server.registerTool(
-    'get_schedule_upcoming_dates',
-    {
-      title: 'Get Schedule Upcoming Dates',
-      description:
-        'Calculate upcoming occurrence dates for a schedule ID or date recurrence config over a given date range or occurrence count.',
-      inputSchema: {
-        scheduleId: z
-          .string()
-          .optional()
-          .describe('Schedule ID to expand upcoming dates for.'),
-        date: scheduleDateSchema
-          .optional()
-          .describe(
-            'Explicit date string or recurrence config object to expand if scheduleId is not provided.',
-          ),
-        start: isoDateSchema
-          .optional()
-          .describe('Inclusive start date in YYYY-MM-DD format (defaults to today).'),
-        end: isoDateSchema
-          .optional()
-          .describe('Inclusive end date in YYYY-MM-DD format.'),
-        count: z
-          .number()
-          .int()
-          .min(1)
-          .max(100)
-          .optional()
-          .describe(
-            'Number of upcoming occurrences to calculate (default 10 if end is omitted).',
-          ),
-        forceSync: z
-          .boolean()
-          .optional()
-          .describe('Force a sync with the Sync Server before reading.'),
-      },
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.getScheduleDates) {
-        throw new Error('getScheduleDates is not supported by the configured BudgetGateway');
-      }
-      const filter = stripUndefined(args);
-      const dates = await budgetGateway.getScheduleDates(filter);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({ dates }, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'create_schedule',
-    {
-      title: 'Create Schedule',
-      description:
-        'Create a new recurring schedule in the Target Budget with Decimal Amounts, recurrence configuration, and linked account/payee.',
-      inputSchema: {
-        name: z
-          .string()
-          .optional()
-          .describe('Display name for the recurring schedule (e.g. "Rent", "Netflix").'),
-        account: z
-          .string()
-          .describe('Account ID the schedule is associated with.'),
-        payee: z
-          .string()
-          .optional()
-          .describe('Payee ID the schedule is associated with.'),
-        amount: scheduleAmountSchema.describe(
-          'Schedule monetary amount as a Decimal Amount (negative for expense/Outflow, positive for income/Inflow) or between range { num1, num2 }.',
-        ),
-        amountOp: z
-          .enum(['is', 'isapprox', 'isbetween'])
-          .optional()
-          .describe('Amount match operator: "is", "isapprox", or "isbetween" (default: "is").'),
-        date: scheduleDateSchema.describe(
-          'Recurrence config object (e.g. { frequency: "monthly", start: "2026-11-01" }) or exact date string.',
-        ),
-        posts_transaction: z
-          .boolean()
-          .optional()
-          .describe(
-            'Whether Actual should automatically post transactions for this schedule (default: false).',
-          ),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.createSchedule) {
-        throw new Error('createSchedule is not supported by the configured BudgetGateway');
-      }
-      const result = await budgetGateway.createSchedule(args);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'update_schedule',
-    {
-      title: 'Update Schedule',
-      description:
-        'Update fields on an existing recurring schedule (name, amount as Decimal Amount, amountOp, payee, account, date, posts_transaction, resetNextDate).',
-      inputSchema: {
-        id: z.string().describe('Schedule ID to update.'),
-        name: z.string().optional().describe('New schedule name.'),
-        account: z.string().optional().describe('New account ID.'),
-        payee: z
-          .string()
-          .nullable()
-          .optional()
-          .describe('New payee ID (or null to clear).'),
-        amount: scheduleAmountSchema
-          .optional()
-          .describe('New Decimal Amount or range.'),
-        amountOp: z
-          .enum(['is', 'isapprox', 'isbetween'])
-          .optional()
-          .describe('New amount operator.'),
-        date: scheduleDateSchema
-          .optional()
-          .describe('New recurrence config or date.'),
-        posts_transaction: z
-          .boolean()
-          .optional()
-          .describe('Toggle automatic transaction posting.'),
-        resetNextDate: z
-          .boolean()
-          .optional()
-          .describe(
-            'Recalculate next occurrence date based on current day and date pattern.',
-          ),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async ({ id, resetNextDate, ...fields }) => {
-      if (!budgetGateway.updateSchedule) {
-        throw new Error('updateSchedule is not supported by the configured BudgetGateway');
-      }
-      const strippedFields = stripUndefined(fields);
-      const result = await budgetGateway.updateSchedule(id, strippedFields, resetNextDate);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'delete_schedule',
-    {
-      title: 'Delete Schedule',
-      description:
-        'Permanently delete a recurring schedule from the Target Budget.',
-      inputSchema: {
-        id: z.string().describe('Schedule ID to delete.'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: true,
-      },
-    },
-    async ({ id }) => {
-      if (!budgetGateway.deleteSchedule) {
-        throw new Error('deleteSchedule is not supported by the configured BudgetGateway');
-      }
-      const result = await budgetGateway.deleteSchedule(id);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({ success: true, id: result.id }, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
     'list_rules',
     {
       title: 'List Automation Rules',
@@ -1690,127 +1254,148 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
   );
 
   server.registerTool(
-    'create_rule',
+    'manage_automations',
     {
-      title: 'Create Automation Rule',
+      title: 'Manage Automations (Schedules & Rules)',
       description:
-        'Create a new automation rule for categorization, payee renaming, or transaction field manipulation.',
+        'Consolidated Resource Facade for recurring schedules and automation rules, discriminated by target ("schedule" | "rule") and action ("create" | "update" | "delete" | "preview_dates"). Resolves human-readable account, payee, category, and schedule names to UUIDs in-process and uses Decimal Amounts.',
       inputSchema: {
-        stage: z
-          .enum(['pre', 'post', 'default'])
+        target: z
+          .enum(['schedule', 'rule'])
+          .describe('Target automation type: "schedule" or "rule".'),
+        action: z
+          .enum(['create', 'update', 'delete', 'preview_dates'])
+          .describe(
+            'Lifecycle action to perform: "create", "update", "delete", or "preview_dates" (schedule only).',
+          ),
+        id: z
+          .string()
           .optional()
           .describe(
-            'Rule execution stage: "pre" (import/creation), "post", or "default" (default: "pre").',
+            'Schedule ID (or existing schedule name) or Rule ID for update, delete, or preview_dates.',
+          ),
+        scheduleId: z
+          .string()
+          .optional()
+          .describe(
+            'Schedule ID (or existing schedule name) for preview_dates, update, or delete.',
+          ),
+        name: z
+          .string()
+          .optional()
+          .describe(
+            'Display name for schedule create/update, or existing schedule name for delete/preview_dates.',
+          ),
+        account: z
+          .string()
+          .optional()
+          .describe('Account name or UUID for schedule create/update.'),
+        accountId: z
+          .string()
+          .optional()
+          .describe('Alias for account (name or UUID) for schedule create/update.'),
+        payee: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('Payee name or UUID (or null to clear) for schedule create/update.'),
+        payeeId: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('Alias for payee (name or UUID, or null to clear) for schedule create/update.'),
+        amount: scheduleAmountSchema
+          .optional()
+          .describe(
+            'Schedule monetary amount as a Decimal Amount (negative for Outflow, positive for Inflow) or { num1, num2 } range.',
+          ),
+        amountOp: z
+          .enum(['is', 'isapprox', 'isbetween'])
+          .optional()
+          .describe('Schedule amount match operator: "is", "isapprox", or "isbetween".'),
+        date: scheduleDateSchema
+          .optional()
+          .describe(
+            'Schedule recurrence config object (e.g. { frequency: "monthly", start: "2026-11-01" }) or exact YYYY-MM-DD date.',
+          ),
+        postsTransaction: z
+          .boolean()
+          .optional()
+          .describe(
+            'Whether Actual should automatically post transactions for this schedule (default: false).',
+          ),
+        posts_transaction: z
+          .boolean()
+          .optional()
+          .describe('Alias for postsTransaction.'),
+        resetNextDate: z
+          .boolean()
+          .optional()
+          .describe(
+            'When updating a schedule, recalculate next occurrence date based on current day and date pattern.',
+          ),
+        start: isoDateSchema
+          .optional()
+          .describe('Inclusive start date in YYYY-MM-DD format for preview_dates (defaults to today).'),
+        end: isoDateSchema
+          .optional()
+          .describe('Inclusive end date in YYYY-MM-DD format for preview_dates.'),
+        count: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe(
+            'Number of upcoming occurrences to calculate for preview_dates (default 10, max 100).',
+          ),
+        forceSync: z
+          .boolean()
+          .optional()
+          .describe('Force a sync with the Sync Server before preview_dates.'),
+        stage: z
+          .enum(['pre', 'post', 'default'])
+          .nullable()
+          .optional()
+          .describe(
+            'Rule execution stage: "pre" (import/creation), "post", or "default" (or null for default).',
           ),
         conditionsOp: z
           .enum(['and', 'or'])
           .optional()
           .describe(
-            'Condition logical combination operator: "and" (all must match) or "or" (any must match). Default: "and".',
+            'Rule condition combination operator: "and" (all must match) or "or" (any must match). Default: "and".',
           ),
         conditions: z
           .array(ruleConditionSchema)
           .min(1)
-          .describe('List of rule conditions.'),
+          .optional()
+          .describe(
+            'List of rule conditions (supports human-readable names for payee, account, and category fields, and Decimal Amounts for amount).',
+          ),
         actions: z
           .array(ruleActionSchema)
           .min(1)
-          .describe('List of rule actions to execute when conditions match.'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.createRule) {
-        throw new Error('createRule is not supported by the configured BudgetGateway');
-      }
-      const rule = await budgetGateway.createRule(args);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({ rule }, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'update_rule',
-    {
-      title: 'Update Automation Rule',
-      description:
-        'Update conditions, actions, stage, or conditionsOp for an existing automation rule by ID.',
-      inputSchema: {
-        id: z.string().describe('Rule ID to update.'),
-        stage: z
-          .enum(['pre', 'post', 'default'])
           .optional()
-          .describe('Updated execution stage.'),
-        conditionsOp: z
-          .enum(['and', 'or'])
-          .optional()
-          .describe('Updated condition combination operator.'),
-        conditions: z
-          .array(ruleConditionSchema)
-          .min(1)
-          .describe('Complete list of updated rule conditions.'),
-        actions: z
-          .array(ruleActionSchema)
-          .min(1)
-          .describe('Complete list of updated rule actions.'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-      },
-    },
-    async (args) => {
-      if (!budgetGateway.updateRule) {
-        throw new Error('updateRule is not supported by the configured BudgetGateway');
-      }
-      const rule = await budgetGateway.updateRule(args);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({ rule }, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'delete_rule',
-    {
-      title: 'Delete Automation Rule',
-      description:
-        'Permanently delete an automation rule from the Target Budget.',
-      inputSchema: {
-        id: z.string().describe('Rule ID to delete.'),
+          .describe(
+            'List of rule actions (supports human-readable names for payee, account, and category fields, and Decimal Amounts for monetary actions).',
+          ),
       },
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
       },
     },
-    async ({ id }) => {
-      if (!budgetGateway.deleteRule) {
-        throw new Error('deleteRule is not supported by the configured BudgetGateway');
+    async (args) => {
+      if (!budgetGateway.manageAutomations) {
+        throw new Error(
+          'manageAutomations is not supported by the configured BudgetGateway',
+        );
       }
-      const result = await budgetGateway.deleteRule(id);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({ success: true, id: result.id }, null, 2),
-          },
-        ],
-      };
+      const normalizedInput = stripUndefined(args);
+      return executeResourceFacadeTool(() =>
+        budgetGateway.manageAutomations!(normalizedInput),
+      );
     },
   );
 

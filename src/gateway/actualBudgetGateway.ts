@@ -2,6 +2,16 @@ import fs from 'node:fs';
 import * as actualApi from '@actual-app/api';
 import { decimalToMinorAmount, minorToDecimalAmount, toMinorUnits } from '../currency.js';
 import {
+  createResourceFacadeResponse,
+  EntityResolutionError,
+  resolveAccount,
+  resolveCategory,
+  resolveCategoryGroup,
+  resolvePayee,
+  resolveSchedule,
+  type BudgetCacheSource,
+} from './resolver.js';
+import {
   collectMonetaryKeys,
   compileStructuredAqlQuery,
   convertAqlRowAmounts,
@@ -32,7 +42,13 @@ import type {
   DeleteTransactionResult,
   GetSpendingSummaryInput,
   GetTransactionsFilter,
+  ManageAccountsInput,
+  ManageAutomationsInput,
+  ManageCategoriesInput,
+  ManagePayeesInput,
+  ManageTransactionsInput,
   PayeeSummary,
+  ResourceFacadeResult,
   RunBankSyncResult,
   SetBudgetAmountInput,
   SetBudgetAmountResult,
@@ -249,6 +265,7 @@ export interface ActualApiAdapter {
     id: string,
     transferAccountId?: string,
     transferCategoryId?: string,
+    forced?: boolean,
   ): Promise<unknown>;
   reopenAccount?(id: string): Promise<unknown>;
   runBankSync?(args?: { accountId?: string }): Promise<unknown>;
@@ -305,6 +322,7 @@ export interface ActualBudgetGateway extends BudgetGateway {
   createTransactions(input: CreateTransactionsInput): Promise<CreateTransactionsResult>;
   updateTransaction(input: UpdateTransactionInput): Promise<UpdateTransactionResult>;
   deleteTransaction(id: string): Promise<DeleteTransactionResult>;
+  manageTransactions(input: ManageTransactionsInput): Promise<ResourceFacadeResult<unknown>>;
   setBudgetAmount(input: SetBudgetAmountInput): Promise<SetBudgetAmountResult>;
   createCategory(input: CreateCategoryInput): Promise<CreateCategoryResult>;
   updateCategory(input: UpdateCategoryInput): Promise<UpdateCategoryResult>;
@@ -312,6 +330,7 @@ export interface ActualBudgetGateway extends BudgetGateway {
   createCategoryGroup(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult>;
   updateCategoryGroup(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult>;
   deleteCategoryGroup(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult>;
+  manageCategories(input: ManageCategoriesInput): Promise<ResourceFacadeResult<unknown>>;
   setBudgetCarryover(
     month: string,
     categoryId: string,
@@ -326,6 +345,7 @@ export interface ActualBudgetGateway extends BudgetGateway {
     targetId: string,
     mergeIds: string[],
   ): Promise<{ targetId: string; mergedCount: number }>;
+  managePayees(input: ManagePayeesInput): Promise<ResourceFacadeResult<unknown>>;
   createAccount(
     account: { name: string; type: AccountType; offbudget?: boolean },
     initialBalance?: number,
@@ -340,6 +360,7 @@ export interface ActualBudgetGateway extends BudgetGateway {
     transferCategoryId?: string,
   ): Promise<{ id: string }>;
   reopenAccount(id: string): Promise<{ id: string }>;
+  manageAccounts(input: ManageAccountsInput): Promise<ResourceFacadeResult<unknown>>;
   runBankSync(accountId?: string): Promise<RunBankSyncResult>;
   listSchedules(options?: { forceSync?: boolean }): Promise<ScheduleSummary[]>;
   getScheduleDates(input: GetScheduleDatesInput): Promise<string[]>;
@@ -354,6 +375,7 @@ export interface ActualBudgetGateway extends BudgetGateway {
   createRule(input: CreateRuleInput): Promise<RuleSummary>;
   updateRule(input: UpdateRuleInput): Promise<RuleSummary>;
   deleteRule(id: string): Promise<{ id: string }>;
+  manageAutomations(input: ManageAutomationsInput): Promise<ResourceFacadeResult<unknown>>;
   executeRead<T>(
     operation: (api: ActualApiAdapter) => Promise<T>,
     options?: { forceSync?: boolean },
@@ -475,6 +497,107 @@ const convertRuleActionsToInternal = (actions: RuleAction[]): RuleAction[] =>
 const convertRuleActionsToExternal = (actions: RuleAction[]): RuleAction[] =>
   transformRuleActionsAmount(actions, minorToDecimalAmount);
 
+const ENTITY_MATCH_OPS = new Set(['is', 'isNot', 'oneOf', 'notOneOf']);
+
+async function resolveRuleEntityValue(
+  field: string,
+  value: unknown,
+  source: BudgetCacheSource,
+  resolved: Record<string, string>,
+): Promise<unknown> {
+  const resolveSingle = async (item: unknown): Promise<unknown> => {
+    if (typeof item !== 'string' || item.trim().length === 0) {
+      return item;
+    }
+    if (field === 'payee') {
+      const entity = await resolvePayee(item, source, resolved);
+      return entity.id;
+    }
+    if (field === 'account') {
+      const entity = await resolveAccount(item, source, resolved);
+      return entity.id;
+    }
+    if (field === 'category') {
+      const entity = await resolveCategory(item, source, resolved);
+      return entity.id;
+    }
+    if (field === 'schedule') {
+      const entity = await resolveSchedule(item, source, resolved);
+      return entity.id;
+    }
+    return item;
+  };
+
+  if (Array.isArray(value)) {
+    const resolvedArray: unknown[] = [];
+    for (const item of value) {
+      resolvedArray.push(await resolveSingle(item));
+    }
+    return resolvedArray;
+  }
+
+  return resolveSingle(value);
+}
+
+async function resolveRuleConditionsEntities(
+  conditions: RuleCondition[],
+  source: BudgetCacheSource,
+  resolved: Record<string, string>,
+): Promise<RuleCondition[]> {
+  const result: RuleCondition[] = [];
+  for (const cond of conditions) {
+    if (
+      (cond.field === 'payee' || cond.field === 'account' || cond.field === 'category') &&
+      ENTITY_MATCH_OPS.has(cond.op)
+    ) {
+      const resolvedValue = await resolveRuleEntityValue(
+        cond.field,
+        cond.value,
+        source,
+        resolved,
+      );
+      result.push({ ...cond, value: resolvedValue });
+    } else {
+      result.push(cond);
+    }
+  }
+  return result;
+}
+
+async function resolveRuleActionsEntities(
+  actions: RuleAction[],
+  source: BudgetCacheSource,
+  resolved: Record<string, string>,
+): Promise<RuleAction[]> {
+  const result: RuleAction[] = [];
+  for (const act of actions) {
+    if (
+      act.field === 'payee' ||
+      act.field === 'account' ||
+      act.field === 'category'
+    ) {
+      const resolvedValue = await resolveRuleEntityValue(
+        act.field,
+        act.value,
+        source,
+        resolved,
+      );
+      result.push({ ...act, value: resolvedValue });
+    } else if (act.op === 'link-schedule') {
+      const resolvedValue = await resolveRuleEntityValue(
+        'schedule',
+        act.value,
+        source,
+        resolved,
+      );
+      result.push({ ...act, value: resolvedValue });
+    } else {
+      result.push(act);
+    }
+  }
+  return result;
+}
+
 function formatRuleSummary(rawRule: ActualRuleRecord): RuleSummary {
   const conditions = Array.isArray(rawRule.conditions)
     ? convertRuleConditionsToExternal(rawRule.conditions)
@@ -494,6 +617,67 @@ function formatRuleSummary(rawRule: ActualRuleRecord): RuleSummary {
     conditionsOp,
     conditions,
     actions,
+  };
+}
+
+function createMemoizedBudgetCacheSource(
+  apiAdapter: ActualApiAdapter,
+): Omit<BudgetCacheSource, 'getAccounts' | 'getPayees' | 'getSchedules'> & {
+  getAccounts: () => Promise<ActualAccountRecord[]>;
+  getPayees: () => Promise<ActualPayeeRecord[]>;
+  getSchedules: () => Promise<ActualScheduleRecord[]>;
+  appendPayee: (payee: ActualPayeeRecord) => void;
+} {
+  let memoAccounts: ActualAccountRecord[] | null = null;
+  let memoGroups: ActualCategoryGroupRecord[] | null = null;
+  let memoCategories: ActualCategoryRecord[] | null = null;
+  let memoPayees: ActualPayeeRecord[] | null = null;
+  let memoSchedules: ActualScheduleRecord[] | null = null;
+
+  return {
+    getAccounts: async () => {
+      if (!memoAccounts) {
+        memoAccounts = (await apiAdapter.getAccounts?.()) ?? [];
+      }
+      return memoAccounts;
+    },
+    ...(apiAdapter.getCategoryGroups
+      ? {
+          getCategoryGroups: async () => {
+            if (!memoGroups) {
+              memoGroups = (await apiAdapter.getCategoryGroups?.()) ?? [];
+            }
+            return memoGroups;
+          },
+        }
+      : {}),
+    ...(apiAdapter.getCategories
+      ? {
+          getCategories: async () => {
+            if (!memoCategories) {
+              memoCategories = (await apiAdapter.getCategories?.()) ?? [];
+            }
+            return memoCategories;
+          },
+        }
+      : {}),
+    getPayees: async () => {
+      if (!memoPayees) {
+        memoPayees = (await apiAdapter.getPayees?.()) ?? [];
+      }
+      return memoPayees;
+    },
+    getSchedules: async () => {
+      if (!memoSchedules) {
+        memoSchedules = (await apiAdapter.getSchedules?.()) ?? [];
+      }
+      return memoSchedules;
+    },
+    appendPayee: (payee: ActualPayeeRecord) => {
+      if (memoPayees) {
+        memoPayees.push(payee);
+      }
+    },
   };
 }
 
@@ -1251,6 +1435,332 @@ export function createActualBudgetGateway(
         return { deleted };
       });
     },
+    async manageTransactions(
+      input: ManageTransactionsInput,
+    ): Promise<ResourceFacadeResult<unknown>> {
+      if (input.action === 'create') {
+        if (input.transactions.length < 1 || input.transactions.length > 50) {
+          throw new Error('manageTransactions create requires between 1 and 50 transactions');
+        }
+        const rawAccount = input.account ?? input.accountId;
+        if (!rawAccount || rawAccount.trim().length === 0) {
+          throw new Error('manageTransactions create requires account or accountId');
+        }
+
+        return executeWrite(async (apiAdapter) => {
+          const resolved: Record<string, string> = {};
+          const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+
+          const resolvedAccount = await resolveAccount(rawAccount, cacheSource, resolved);
+          const mappedTransactions: ActualImportTransactionInput[] = [];
+
+          for (const tx of input.transactions) {
+            let payeeId: string | undefined;
+            let payeeName: string | undefined;
+
+            if (tx.payeeId !== undefined) {
+              const resolvedPayee = await resolvePayee(tx.payeeId, cacheSource, resolved);
+              payeeId = resolvedPayee.id;
+            } else {
+              const rawPayee = tx.payee ?? tx.payeeName;
+              if (rawPayee !== undefined) {
+                try {
+                  const resolvedPayee = await resolvePayee(rawPayee, cacheSource, resolved);
+                  payeeId = resolvedPayee.id;
+                } catch (err) {
+                  if (err instanceof EntityResolutionError) {
+                    payeeName = rawPayee;
+                  } else {
+                    throw err;
+                  }
+                }
+              }
+            }
+
+            let categoryId: string | undefined;
+            const rawCategory = tx.category ?? tx.categoryId;
+            if (rawCategory !== undefined) {
+              const resolvedCat = await resolveCategory(rawCategory, cacheSource, resolved);
+              categoryId = resolvedCat.id;
+            }
+
+            mappedTransactions.push({
+              account: resolvedAccount.id,
+              date: tx.date,
+              amount: decimalToMinorAmount(tx.amount),
+              ...(payeeId !== undefined ? { payee: payeeId } : {}),
+              ...(payeeName !== undefined ? { payee_name: payeeName } : {}),
+              ...(categoryId !== undefined ? { category: categoryId } : {}),
+              ...(tx.notes !== undefined ? { notes: tx.notes } : {}),
+              ...(tx.cleared !== undefined ? { cleared: tx.cleared } : {}),
+              ...(tx.importedId !== undefined ? { imported_id: tx.importedId } : {}),
+            });
+          }
+
+          const runRules = input.runRules ?? true;
+          const count = mappedTransactions.length;
+          const noun = count === 1 ? 'transaction' : 'transactions';
+
+          if (runRules) {
+            if (!apiAdapter.importTransactions) {
+              throw new Error(
+                'importTransactions is not supported by the current API adapter',
+              );
+            }
+            const result = await apiAdapter.importTransactions(
+              resolvedAccount.id,
+              mappedTransactions,
+            );
+            return createResourceFacadeResponse({
+              message: `Created ${count} ${noun} in account "${resolvedAccount.id}".`,
+              data: {
+                accountId: resolvedAccount.id,
+                mode: 'import' as const,
+                added: result?.added ?? [],
+                updated: result?.updated ?? [],
+                errors: result?.errors ?? [],
+              },
+              resolved,
+            });
+          }
+
+          if (!apiAdapter.addTransactions) {
+            throw new Error(
+              'addTransactions is not supported by the current API adapter',
+            );
+          }
+          await apiAdapter.addTransactions(resolvedAccount.id, mappedTransactions);
+          return createResourceFacadeResponse({
+            message: `Created ${count} ${noun} in account "${resolvedAccount.id}".`,
+            data: {
+              accountId: resolvedAccount.id,
+              mode: 'add' as const,
+              added: [],
+              updated: [],
+              errors: [],
+            },
+            resolved,
+          });
+        });
+      }
+
+      if (input.action === 'update') {
+        const targetIds =
+          input.ids !== undefined && input.ids.length > 0
+            ? input.ids
+            : input.id !== undefined
+              ? [input.id]
+              : [];
+
+        if (targetIds.length < 1 || targetIds.length > 50) {
+          throw new Error(
+            'manageTransactions update requires between 1 and 50 transaction IDs',
+          );
+        }
+
+        return executeWrite(async (apiAdapter) => {
+          if (!apiAdapter.updateTransaction) {
+            throw new Error(
+              'updateTransaction is not supported by the current API adapter',
+            );
+          }
+
+          const beforeRecords = await fetchEnrichedTransactions(apiAdapter);
+          const previousRecords: TransactionRecord[] = [];
+          for (const targetId of targetIds) {
+            const found = findTransactionById(beforeRecords, targetId);
+            if (!found) {
+              throw new Error(`Transaction not found: ${targetId}`);
+            }
+            previousRecords.push(found);
+          }
+
+          const resolved: Record<string, string> = {};
+          const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+
+          const fields: Record<string, unknown> = {};
+          let resolvedAccountId: string | undefined;
+          let resolvedAccountName: string | undefined;
+          let resolvedPayeeId: string | null | undefined;
+          let resolvedCategoryId: string | null | undefined;
+
+          const rawAccount = input.account ?? input.accountId;
+          if (rawAccount !== undefined && rawAccount.trim().length > 0) {
+            const resolvedAcct = await resolveAccount(rawAccount, cacheSource, resolved);
+            resolvedAccountId = resolvedAcct.id;
+            resolvedAccountName = resolvedAcct.name;
+            fields.account = resolvedAcct.id;
+          }
+
+          if (input.date !== undefined) {
+            fields.date = input.date;
+          }
+          if (input.amount !== undefined) {
+            fields.amount = decimalToMinorAmount(input.amount);
+          }
+
+          const hasPayeeUpdate =
+            input.payee !== undefined ||
+            input.payeeId !== undefined ||
+            input.payeeName !== undefined;
+          if (hasPayeeUpdate) {
+            const rawPayee =
+              input.payee !== undefined
+                ? input.payee
+                : input.payeeId !== undefined
+                  ? input.payeeId
+                  : input.payeeName;
+            if (rawPayee === null) {
+              resolvedPayeeId = null;
+              fields.payee = null;
+            } else if (rawPayee !== undefined) {
+              try {
+                const resolvedPayee = await resolvePayee(
+                  rawPayee,
+                  cacheSource,
+                  resolved,
+                );
+                resolvedPayeeId = resolvedPayee.id;
+                fields.payee = resolvedPayee.id;
+              } catch (err) {
+                if (err instanceof EntityResolutionError) {
+                  if (!apiAdapter.createPayee) {
+                    throw err;
+                  }
+                  const createdPayeeId = await apiAdapter.createPayee({
+                    name: rawPayee.trim(),
+                  });
+                  resolved[rawPayee] = createdPayeeId;
+                  cacheSource.appendPayee({ id: createdPayeeId, name: rawPayee.trim() });
+                  resolvedPayeeId = createdPayeeId;
+                  fields.payee = createdPayeeId;
+                } else {
+                  throw err;
+                }
+              }
+            }
+          }
+
+          const hasCategoryUpdate =
+            input.category !== undefined || input.categoryId !== undefined;
+          if (hasCategoryUpdate) {
+            const rawCategory =
+              input.category !== undefined ? input.category : input.categoryId;
+            if (rawCategory === null) {
+              resolvedCategoryId = null;
+              fields.category = null;
+            } else if (rawCategory !== undefined) {
+              const resolvedCategory = await resolveCategory(
+                rawCategory,
+                cacheSource,
+                resolved,
+              );
+              resolvedCategoryId = resolvedCategory.id;
+              fields.category = resolvedCategory.id;
+            }
+          }
+
+          if (input.notes !== undefined) {
+            fields.notes = input.notes;
+          }
+          if (input.cleared !== undefined) {
+            fields.cleared = input.cleared;
+          }
+
+          for (const targetId of targetIds) {
+            await apiAdapter.updateTransaction(targetId, fields);
+          }
+
+          const afterRecords = await fetchEnrichedTransactions(apiAdapter);
+          const updatedRecords: TransactionRecord[] = targetIds.map((targetId, idx) => {
+            const previous = previousRecords[idx]!;
+            return (
+              findTransactionById(afterRecords, targetId) ?? {
+                ...previous,
+                ...(resolvedAccountId !== undefined
+                  ? {
+                      account: resolvedAccountId,
+                      accountId: resolvedAccountId,
+                      ...(resolvedAccountName !== undefined
+                        ? { accountName: resolvedAccountName }
+                        : {}),
+                    }
+                  : {}),
+                ...(input.date !== undefined ? { date: input.date } : {}),
+                ...(input.amount !== undefined ? { amount: input.amount } : {}),
+                ...(resolvedPayeeId !== undefined
+                  ? { payee: resolvedPayeeId, payeeId: resolvedPayeeId }
+                  : {}),
+                ...(resolvedCategoryId !== undefined
+                  ? { category: resolvedCategoryId, categoryId: resolvedCategoryId }
+                  : {}),
+                ...(input.notes !== undefined ? { notes: input.notes } : {}),
+                ...(input.cleared !== undefined ? { cleared: input.cleared } : {}),
+              }
+            );
+          });
+
+          const count = updatedRecords.length;
+          const noun = count === 1 ? 'transaction' : 'transactions';
+          return createResourceFacadeResponse({
+            message: `Updated ${count} ${noun}.`,
+            data: {
+              updated: updatedRecords,
+              previous: previousRecords,
+            },
+            resolved,
+          });
+        });
+      }
+
+      if (input.action === 'delete') {
+        const targetIds =
+          input.ids !== undefined && input.ids.length > 0
+            ? input.ids
+            : input.id !== undefined
+              ? [input.id]
+              : [];
+
+        if (targetIds.length < 1 || targetIds.length > 50) {
+          throw new Error(
+            'manageTransactions delete requires between 1 and 50 transaction IDs',
+          );
+        }
+
+        return executeWrite(async (apiAdapter) => {
+          if (!apiAdapter.deleteTransaction) {
+            throw new Error(
+              'deleteTransaction is not supported by the current API adapter',
+            );
+          }
+
+          const beforeRecords = await fetchEnrichedTransactions(apiAdapter);
+          const deletedRecords: TransactionRecord[] = [];
+          for (const targetId of targetIds) {
+            const found = findTransactionById(beforeRecords, targetId);
+            if (!found) {
+              throw new Error(`Transaction not found: ${targetId}`);
+            }
+            deletedRecords.push(found);
+          }
+
+          for (const targetId of targetIds) {
+            await apiAdapter.deleteTransaction(targetId);
+          }
+
+          const count = deletedRecords.length;
+          const noun = count === 1 ? 'transaction' : 'transactions';
+          return createResourceFacadeResponse({
+            message: `Deleted ${count} ${noun}.`,
+            data: {
+              deleted: deletedRecords,
+            },
+          });
+        });
+      }
+
+      throw new Error(`Unsupported manageTransactions action: ${(input as { action: string }).action}`);
+    },
     async setBudgetAmount(
       input: SetBudgetAmountInput,
     ): Promise<SetBudgetAmountResult> {
@@ -1386,6 +1896,514 @@ export function createActualBudgetGateway(
         return { id: input.id, success: true };
       });
     },
+    async manageCategories(
+      input: ManageCategoriesInput,
+    ): Promise<ResourceFacadeResult<unknown>> {
+      const target = input.target ?? 'category';
+
+      return executeWrite(async (apiAdapter) => {
+        const resolved: Record<string, string> = {};
+        const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+
+        if (input.action === 'create') {
+          const name = input.name?.trim();
+          if (!name) {
+            throw new Error('manage_categories create requires a non-empty name');
+          }
+
+          if (target === 'group') {
+            if (!apiAdapter.createCategoryGroup) {
+              throw new Error(
+                'createCategoryGroup is not supported by the current API adapter',
+              );
+            }
+            const groupId = await apiAdapter.createCategoryGroup({
+              name,
+              ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
+              ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+            });
+            resolved[input.name!] = groupId;
+            return createResourceFacadeResponse({
+              message: `Created category group "${name}" (${groupId}).`,
+              data: {
+                id: groupId,
+                name,
+                ...(input.isIncome !== undefined ? { isIncome: input.isIncome } : {}),
+                ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+              },
+              resolved,
+            });
+          }
+
+          const groupRef = input.group ?? input.groupId;
+          if (!groupRef?.trim()) {
+            throw new Error(
+              'manage_categories create for a category requires a group or groupId',
+            );
+          }
+
+          let groupId: string;
+          let groupName: string;
+          let groupCreated = false;
+
+          try {
+            const matchedGroup = await resolveCategoryGroup(
+              groupRef,
+              cacheSource,
+              resolved,
+            );
+            groupId = matchedGroup.id;
+            groupName = matchedGroup.name ?? groupRef;
+          } catch (error) {
+            if (!(error instanceof EntityResolutionError)) {
+              throw error;
+            }
+            if (!apiAdapter.createCategoryGroup) {
+              throw new Error(
+                'createCategoryGroup is not supported by the current API adapter',
+              );
+            }
+            groupName = groupRef.trim();
+            groupId = await apiAdapter.createCategoryGroup({
+              name: groupName,
+              ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
+            });
+            groupCreated = true;
+            resolved[groupRef] = groupId;
+          }
+
+          if (!apiAdapter.createCategory) {
+            throw new Error(
+              'createCategory is not supported by the current API adapter',
+            );
+          }
+          const categoryId = await apiAdapter.createCategory({
+            name,
+            group_id: groupId,
+            ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
+            ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+          });
+          resolved[input.name!] = categoryId;
+
+          return createResourceFacadeResponse({
+            message: groupCreated
+              ? `Created category "${name}" (${categoryId}) in newly created group "${groupName}" (${groupId}).`
+              : `Created category "${name}" (${categoryId}) in group "${groupName}" (${groupId}).`,
+            data: {
+              id: categoryId,
+              name,
+              groupId,
+              ...(groupCreated ? { groupCreated: true } : {}),
+              ...(input.isIncome !== undefined ? { isIncome: input.isIncome } : {}),
+              ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+            },
+            resolved,
+          });
+        }
+
+        if (input.action === 'update') {
+          const targetRef = input.id ?? input.name;
+          if (!targetRef?.trim()) {
+            throw new Error(
+              'manage_categories update requires a target id or name',
+            );
+          }
+          const effectiveNewName =
+            input.newName ?? (input.id !== undefined ? input.name : undefined);
+
+          if (target === 'group') {
+            if (!apiAdapter.updateCategoryGroup) {
+              throw new Error(
+                'updateCategoryGroup is not supported by the current API adapter',
+              );
+            }
+            const targetGroup = await resolveCategoryGroup(
+              targetRef,
+              cacheSource,
+              resolved,
+            );
+            const fields: Record<string, unknown> = {};
+            if (effectiveNewName !== undefined) fields.name = effectiveNewName;
+            if (input.isIncome !== undefined) fields.is_income = input.isIncome;
+            if (input.hidden !== undefined) fields.hidden = input.hidden;
+
+            await apiAdapter.updateCategoryGroup(targetGroup.id, fields);
+            const updatedName = effectiveNewName ?? targetGroup.name ?? targetGroup.id;
+
+            return createResourceFacadeResponse({
+              message: `Updated category group "${updatedName}" (${targetGroup.id}).`,
+              data: {
+                id: targetGroup.id,
+                name: updatedName,
+                ...(input.isIncome !== undefined ? { isIncome: input.isIncome } : {}),
+                ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+              },
+              resolved,
+            });
+          }
+
+          if (!apiAdapter.updateCategory) {
+            throw new Error(
+              'updateCategory is not supported by the current API adapter',
+            );
+          }
+          const targetCat = await resolveCategory(
+            targetRef,
+            cacheSource,
+            resolved,
+          );
+          const groupRef = input.group ?? input.groupId;
+          let resolvedGroupId: string | undefined;
+          if (groupRef !== undefined && groupRef.trim() !== '') {
+            const matchedGroup = await resolveCategoryGroup(
+              groupRef,
+              cacheSource,
+              resolved,
+            );
+            resolvedGroupId = matchedGroup.id;
+          }
+
+          const fields: Record<string, unknown> = {};
+          if (effectiveNewName !== undefined) fields.name = effectiveNewName;
+          if (resolvedGroupId !== undefined) fields.group_id = resolvedGroupId;
+          if (input.isIncome !== undefined) fields.is_income = input.isIncome;
+          if (input.hidden !== undefined) fields.hidden = input.hidden;
+
+          await apiAdapter.updateCategory(targetCat.id, fields);
+          const updatedName = effectiveNewName ?? targetCat.name ?? targetCat.id;
+
+          return createResourceFacadeResponse({
+            message: `Updated category "${updatedName}" (${targetCat.id}).`,
+            data: {
+              id: targetCat.id,
+              name: updatedName,
+              ...(resolvedGroupId !== undefined ? { groupId: resolvedGroupId } : {}),
+              ...(input.isIncome !== undefined ? { isIncome: input.isIncome } : {}),
+              ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+            },
+            resolved,
+          });
+        }
+
+        if (input.action === 'move') {
+          if (target === 'group') {
+            throw new Error(
+              'manage_categories move is only supported for categories (target: "category")',
+            );
+          }
+          const targetRef = input.id ?? input.name;
+          if (!targetRef?.trim()) {
+            throw new Error(
+              'manage_categories move requires a category id or name',
+            );
+          }
+          const groupRef = input.group ?? input.groupId;
+          if (!groupRef?.trim()) {
+            throw new Error(
+              'manage_categories move requires a destination group or groupId',
+            );
+          }
+          if (!apiAdapter.updateCategory) {
+            throw new Error(
+              'updateCategory is not supported by the current API adapter',
+            );
+          }
+
+          const targetCat = await resolveCategory(
+            targetRef,
+            cacheSource,
+            resolved,
+          );
+
+          let groupId: string;
+          let groupName: string;
+          let groupCreated = false;
+
+          try {
+            const matchedGroup = await resolveCategoryGroup(
+              groupRef,
+              cacheSource,
+              resolved,
+            );
+            groupId = matchedGroup.id;
+            groupName = matchedGroup.name ?? groupRef;
+          } catch (error) {
+            if (!(error instanceof EntityResolutionError)) {
+              throw error;
+            }
+            if (!apiAdapter.createCategoryGroup) {
+              throw new Error(
+                'createCategoryGroup is not supported by the current API adapter',
+              );
+            }
+            groupName = groupRef.trim();
+            groupId = await apiAdapter.createCategoryGroup({
+              name: groupName,
+              ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
+            });
+            groupCreated = true;
+            resolved[groupRef] = groupId;
+          }
+
+          await apiAdapter.updateCategory(targetCat.id, { group_id: groupId });
+          const categoryLabel = targetCat.name ?? targetCat.id;
+
+          return createResourceFacadeResponse({
+            message: groupCreated
+              ? `Moved category "${categoryLabel}" (${targetCat.id}) to newly created group "${groupName}" (${groupId}).`
+              : `Moved category "${categoryLabel}" (${targetCat.id}) to group "${groupName}" (${groupId}).`,
+            data: {
+              id: targetCat.id,
+              name: categoryLabel,
+              groupId,
+              ...(groupCreated ? { groupCreated: true } : {}),
+            },
+            resolved,
+          });
+        }
+
+        if (input.action === 'delete') {
+          const targetRef = input.id ?? input.name;
+          if (!targetRef?.trim()) {
+            throw new Error(
+              'manage_categories delete requires a target id or name',
+            );
+          }
+          const transferRef = input.transferTo ?? input.transferCategoryId;
+
+          const rawGroups = (await cacheSource.getCategoryGroups?.()) ?? [];
+          const needsFallbackCats = rawGroups.some(
+            (g) => !Array.isArray(g.categories),
+          );
+          const fallbackCats =
+            needsFallbackCats && cacheSource.getCategories
+              ? await cacheSource.getCategories()
+              : [];
+          const allCategories =
+            rawGroups.length > 0
+              ? rawGroups.flatMap((g) =>
+                  Array.isArray(g.categories)
+                    ? g.categories
+                    : fallbackCats.filter((c) => c.group_id === g.id),
+                )
+              : cacheSource.getCategories
+                ? await cacheSource.getCategories()
+                : [];
+
+          const countTransactionsForCategories = async (
+            categoryIds: Set<string>,
+          ): Promise<number> => {
+            if (!apiAdapter.getTransactions || categoryIds.size === 0) {
+              return 0;
+            }
+            const txs = (await apiAdapter.getTransactions('', '', '')) ?? [];
+            let count = 0;
+            const checkTx = (tx: ActualTransactionRecord): void => {
+              if (tx.category && categoryIds.has(tx.category)) {
+                count += 1;
+              }
+              if (Array.isArray(tx.subtransactions)) {
+                for (const sub of tx.subtransactions) {
+                  checkTx(sub);
+                }
+              }
+            };
+            for (const tx of txs) {
+              checkTx(tx);
+            }
+            return count;
+          };
+
+          const buildTransferRequiredError = (
+            entityLabel: string,
+            excludedCategoryIds: Set<string>,
+          ): Error & { suggestions: string[] } => {
+            const suggestions = allCategories
+              .filter((c) => !excludedCategoryIds.has(c.id) && Boolean(c.name))
+              .map((c) => c.name);
+            const suggestionSuffix =
+              suggestions.length > 0
+                ? ` Available transferTo categories: ${suggestions.map((s) => `"${s}"`).join(', ')}.`
+                : '';
+            const err = new Error(
+              `Cannot delete ${entityLabel} because it has existing transactions. Specify a "transferTo" category (name or UUID) to reassign transactions safely.${suggestionSuffix}`,
+            ) as Error & { suggestions: string[] };
+            err.suggestions = suggestions;
+            return err;
+          };
+
+          if (target === 'group') {
+            if (!apiAdapter.deleteCategoryGroup) {
+              throw new Error(
+                'deleteCategoryGroup is not supported by the current API adapter',
+              );
+            }
+            const targetGroup = await resolveCategoryGroup(
+              targetRef,
+              cacheSource,
+              resolved,
+            );
+            const groupRecord = rawGroups.find((g) => g.id === targetGroup.id);
+            const groupCategories = groupRecord
+              ? Array.isArray(groupRecord.categories)
+                ? groupRecord.categories
+                : fallbackCats.filter((c) => c.group_id === groupRecord.id)
+              : allCategories.filter((c) => c.group_id === targetGroup.id);
+            const memberCategoryIds = new Set(groupCategories.map((c) => c.id));
+            const groupLabel = targetGroup.name ?? targetGroup.id;
+
+            let transferCategoryId: string | undefined;
+            if (transferRef !== undefined && transferRef.trim() !== '') {
+              const transferCat = await resolveCategory(
+                transferRef,
+                cacheSource,
+                resolved,
+              );
+              if (memberCategoryIds.has(transferCat.id)) {
+                throw new Error(
+                  `Cannot transfer transactions to category "${transferCat.name ?? transferCat.id}" because it belongs to the category group "${groupLabel}" being deleted.`,
+                );
+              }
+              transferCategoryId = transferCat.id;
+            } else {
+              const txCount =
+                await countTransactionsForCategories(memberCategoryIds);
+              if (
+                txCount > 0 ||
+                (!apiAdapter.getTransactions && memberCategoryIds.size > 0)
+              ) {
+                throw buildTransferRequiredError(
+                  `category group "${groupLabel}" (${targetGroup.id})`,
+                  memberCategoryIds,
+                );
+              }
+            }
+
+            let delRes: unknown;
+            try {
+              delRes = await apiAdapter.deleteCategoryGroup(
+                targetGroup.id,
+                transferCategoryId,
+              );
+            } catch (err) {
+              if (!transferCategoryId) {
+                throw buildTransferRequiredError(
+                  `category group "${groupLabel}" (${targetGroup.id})`,
+                  memberCategoryIds,
+                );
+              }
+              throw err;
+            }
+            if (
+              !transferCategoryId &&
+              delRes &&
+              typeof delRes === 'object' &&
+              'error' in delRes &&
+              Boolean((delRes as { error?: unknown }).error)
+            ) {
+              throw buildTransferRequiredError(
+                `category group "${groupLabel}" (${targetGroup.id})`,
+                memberCategoryIds,
+              );
+            }
+
+            return createResourceFacadeResponse({
+              message: transferCategoryId
+                ? `Deleted category group "${groupLabel}" (${targetGroup.id}) and transferred transactions to ${transferCategoryId}.`
+                : `Deleted category group "${groupLabel}" (${targetGroup.id}).`,
+              data: {
+                id: targetGroup.id,
+                name: groupLabel,
+                ...(transferCategoryId ? { transferCategoryId } : {}),
+              },
+              resolved,
+            });
+          }
+
+          if (!apiAdapter.deleteCategory) {
+            throw new Error(
+              'deleteCategory is not supported by the current API adapter',
+            );
+          }
+          const targetCat = await resolveCategory(
+            targetRef,
+            cacheSource,
+            resolved,
+          );
+          const categoryRecord = allCategories.find(
+            (c) => c.id === targetCat.id,
+          );
+          const categoryLabel =
+            targetCat.name ?? categoryRecord?.name ?? targetCat.id;
+          const deletedSet = new Set([targetCat.id]);
+
+          let transferCategoryId: string | undefined;
+          if (transferRef !== undefined && transferRef.trim() !== '') {
+            const transferCat = await resolveCategory(
+              transferRef,
+              cacheSource,
+              resolved,
+            );
+            if (transferCat.id === targetCat.id) {
+              throw new Error(
+                `Cannot transfer transactions to the same category being deleted ("${categoryLabel}").`,
+              );
+            }
+            transferCategoryId = transferCat.id;
+          } else {
+            const txCount = await countTransactionsForCategories(deletedSet);
+            if (txCount > 0) {
+              throw buildTransferRequiredError(
+                `category "${categoryLabel}" (${targetCat.id})`,
+                deletedSet,
+              );
+            }
+          }
+
+          let delRes: unknown;
+          try {
+            delRes = await apiAdapter.deleteCategory(
+              targetCat.id,
+              transferCategoryId,
+            );
+          } catch (err) {
+            if (!transferCategoryId) {
+              throw buildTransferRequiredError(
+                `category "${categoryLabel}" (${targetCat.id})`,
+                deletedSet,
+              );
+            }
+            throw err;
+          }
+          if (
+            !transferCategoryId &&
+            delRes &&
+            typeof delRes === 'object' &&
+            'error' in delRes &&
+            Boolean((delRes as { error?: unknown }).error)
+          ) {
+            throw buildTransferRequiredError(
+              `category "${categoryLabel}" (${targetCat.id})`,
+              deletedSet,
+            );
+          }
+
+          return createResourceFacadeResponse({
+            message: transferCategoryId
+              ? `Deleted category "${categoryLabel}" (${targetCat.id}) and transferred transactions to ${transferCategoryId}.`
+              : `Deleted category "${categoryLabel}" (${targetCat.id}).`,
+            data: {
+              id: targetCat.id,
+              name: categoryLabel,
+              ...(transferCategoryId ? { transferCategoryId } : {}),
+            },
+            resolved,
+          });
+        }
+
+        throw new Error(`Unsupported manage_categories action: ${input.action}`);
+      });
+    },
     async setBudgetCarryover(
       month: string,
       categoryId: string,
@@ -1461,6 +2479,138 @@ export function createActualBudgetGateway(
         return { targetId, mergedCount: mergeIds.length };
       });
     },
+    async managePayees(input: ManagePayeesInput): Promise<ResourceFacadeResult<unknown>> {
+      return executeWrite(async (apiAdapter) => {
+        const resolved: Record<string, string> = {};
+        const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+
+        switch (input.action) {
+          case 'create': {
+            const name = (input.name ?? input.payee ?? '').trim();
+            if (!name) {
+              throw new Error('manage_payees create requires a non-empty name');
+            }
+            if (!apiAdapter.createPayee) {
+              throw new Error('createPayee is not supported by the current API adapter');
+            }
+            const id = await apiAdapter.createPayee({ name });
+            return createResourceFacadeResponse({
+              message: `Created payee "${name}" (${id}).`,
+              data: { id, name },
+            });
+          }
+
+          case 'update': {
+            let targetRef: string;
+            let updatedName: string;
+
+            if (input.newName !== undefined) {
+              targetRef = input.id ?? input.payee ?? input.name ?? '';
+              updatedName = input.newName.trim();
+            } else {
+              targetRef = input.id ?? input.payee ?? '';
+              updatedName = (input.name ?? '').trim();
+            }
+
+            if (!targetRef.trim()) {
+              throw new Error('manage_payees update requires a target payee id or name');
+            }
+            if (!updatedName) {
+              throw new Error(
+                'manage_payees update requires a non-empty newName (or name when id/payee is provided)',
+              );
+            }
+            if (!apiAdapter.updatePayee) {
+              throw new Error('updatePayee is not supported by the current API adapter');
+            }
+
+            const targetPayee = await resolvePayee(targetRef, cacheSource, resolved);
+            await apiAdapter.updatePayee(targetPayee.id, { name: updatedName });
+
+            return createResourceFacadeResponse({
+              message: `Updated payee "${targetPayee.name ?? targetRef.trim()}" (${targetPayee.id}) to "${updatedName}".`,
+              data: { id: targetPayee.id, name: updatedName },
+              resolved,
+            });
+          }
+
+          case 'delete': {
+            const targetRef = input.id ?? input.payee ?? input.name ?? '';
+            if (!targetRef.trim()) {
+              throw new Error('manage_payees delete requires a target payee id or name');
+            }
+            if (!apiAdapter.deletePayee) {
+              throw new Error('deletePayee is not supported by the current API adapter');
+            }
+
+            const targetPayee = await resolvePayee(targetRef, cacheSource, resolved);
+            await apiAdapter.deletePayee(targetPayee.id);
+
+            return createResourceFacadeResponse({
+              message: `Deleted payee "${targetPayee.name ?? targetRef.trim()}" (${targetPayee.id}).`,
+              data: { id: targetPayee.id },
+              resolved,
+            });
+          }
+
+          case 'merge': {
+            const targetRef =
+              input.targetId ??
+              input.target ??
+              input.targetPayeeId ??
+              input.id ??
+              input.payee ??
+              input.name ??
+              '';
+            const rawSources = input.mergeIds ?? input.merge ?? input.sourcePayeeIds;
+
+            if (!targetRef.trim()) {
+              throw new Error(
+                'manage_payees merge requires a target payee (target / targetId)',
+              );
+            }
+            if (!Array.isArray(rawSources) || rawSources.length === 0) {
+              throw new Error(
+                'manage_payees merge requires a non-empty array of source payees (merge / mergeIds)',
+              );
+            }
+            if (rawSources.some((s) => typeof s !== 'string' || !s.trim())) {
+              throw new Error(
+                'manage_payees merge requires non-empty source payee identifiers',
+              );
+            }
+            if (!apiAdapter.mergePayees) {
+              throw new Error('mergePayees is not supported by the current API adapter');
+            }
+
+            const targetPayee = await resolvePayee(targetRef, cacheSource, resolved);
+            const resolvedSourceIds: string[] = [];
+
+            for (const sourceRef of rawSources) {
+              const resolvedSource = await resolvePayee(sourceRef, cacheSource, resolved);
+              resolvedSourceIds.push(resolvedSource.id);
+            }
+
+            await apiAdapter.mergePayees(targetPayee.id, resolvedSourceIds);
+
+            return createResourceFacadeResponse({
+              message: `Merged ${resolvedSourceIds.length} payee(s) into "${targetPayee.name ?? targetRef.trim()}" (${targetPayee.id}).`,
+              data: {
+                targetId: targetPayee.id,
+                mergedIds: resolvedSourceIds,
+                mergedCount: resolvedSourceIds.length,
+              },
+              resolved,
+            });
+          }
+
+          default:
+            throw new Error(
+              `Unsupported manage_payees action: ${String((input as { action?: unknown }).action)}`,
+            );
+        }
+      });
+    },
     async createAccount(
       account: { name: string; type: AccountType; offbudget?: boolean },
       initialBalance?: number,
@@ -1522,6 +2672,206 @@ export function createActualBudgetGateway(
         }
         await apiAdapter.reopenAccount(id);
         return { id };
+      });
+    },
+    async manageAccounts(input: ManageAccountsInput): Promise<ResourceFacadeResult<unknown>> {
+      return executeWrite(async (apiAdapter) => {
+        const resolved: Record<string, string> = {};
+        const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+
+        if (input.action === 'create') {
+          if (!apiAdapter.createAccount) {
+            throw new Error('createAccount is not supported by the current API adapter');
+          }
+          const accountName = (input.name ?? input.account ?? '').trim();
+          if (!accountName) {
+            throw new Error('Account name is required when action is "create"');
+          }
+          const accountType: AccountType = input.type ?? 'checking';
+          const minorBalance =
+            input.initialBalance !== undefined
+              ? toMinorUnits(input.initialBalance)
+              : undefined;
+          const id = await apiAdapter.createAccount(
+            {
+              name: accountName,
+              type: accountType,
+              ...(input.offbudget !== undefined ? { offbudget: input.offbudget } : {}),
+            },
+            minorBalance,
+          );
+          return createResourceFacadeResponse({
+            message: `Created account "${accountName}" (${id})`,
+            data: {
+              id,
+              name: accountName,
+              type: accountType,
+              offbudget: Boolean(input.offbudget),
+              ...(input.initialBalance !== undefined
+                ? { initialBalance: input.initialBalance }
+                : {}),
+            },
+          });
+        }
+
+        if (input.action === 'update') {
+          if (!apiAdapter.updateAccount) {
+            throw new Error('updateAccount is not supported by the current API adapter');
+          }
+          const hasExplicitTarget =
+            input.id !== undefined || input.account !== undefined;
+          const targetInput = (
+            hasExplicitTarget ? (input.id ?? input.account) : input.name
+          )?.trim();
+          if (!targetInput) {
+            throw new Error('Account id or name is required when action is "update"');
+          }
+
+          const updatedName = (
+            hasExplicitTarget ? (input.newName ?? input.name) : input.newName
+          )?.trim();
+
+          const fields: { name?: string; offbudget?: boolean } = {};
+          if (updatedName) {
+            fields.name = updatedName;
+          }
+          if (input.offbudget !== undefined) {
+            fields.offbudget = input.offbudget;
+          }
+          if (fields.name === undefined && fields.offbudget === undefined) {
+            throw new Error(
+              'manageAccounts update requires at least one of newName (or name) or offbudget',
+            );
+          }
+
+          const resolvedTarget = await resolveAccount(
+            hasExplicitTarget ? (input.id ?? input.account!) : input.name!,
+            cacheSource,
+            resolved,
+          );
+          await apiAdapter.updateAccount(resolvedTarget.id, fields);
+
+          const displayName =
+            fields.name ?? resolvedTarget.name ?? resolvedTarget.id;
+          return createResourceFacadeResponse({
+            message: `Updated account "${displayName}" (${resolvedTarget.id})`,
+            data: {
+              id: resolvedTarget.id,
+              ...(fields.name !== undefined ? { name: fields.name } : {}),
+              ...(fields.offbudget !== undefined ? { offbudget: fields.offbudget } : {}),
+            },
+            resolved,
+          });
+        }
+
+        if (input.action === 'close') {
+          if (!apiAdapter.closeAccount) {
+            throw new Error('closeAccount is not supported by the current API adapter');
+          }
+          const rawTargetInput = input.id ?? input.account ?? input.name;
+          if (!rawTargetInput || !rawTargetInput.trim()) {
+            throw new Error('Account id or name is required when action is "close"');
+          }
+
+          const resolvedTarget = await resolveAccount(
+            rawTargetInput,
+            cacheSource,
+            resolved,
+          );
+
+          const rawTransferTo = input.transferTo ?? input.transferAccountId;
+          const resolvedTransferTo =
+            rawTransferTo && rawTransferTo.trim()
+              ? await resolveAccount(rawTransferTo, cacheSource, resolved)
+              : undefined;
+
+          const rawTransferCategory =
+            input.transferCategory ?? input.transferCategoryId;
+          const resolvedTransferCategory =
+            rawTransferCategory && rawTransferCategory.trim()
+              ? await resolveCategory(rawTransferCategory, cacheSource, resolved)
+              : undefined;
+
+          if (!resolvedTransferTo) {
+            const minorBalance = await apiAdapter.getAccountBalance(
+              resolvedTarget.id,
+            );
+            if (minorBalance !== 0) {
+              const decimalBalance = minorToDecimalAmount(minorBalance);
+              const rawAccounts = await cacheSource.getAccounts();
+              const availableAccounts = rawAccounts
+                .filter((a) => a.id !== resolvedTarget.id && !a.closed)
+                .map((a) => a.name);
+              const suggestionSuffix =
+                availableAccounts.length > 0
+                  ? ` Available destination accounts: ${availableAccounts.map((n) => `"${n}"`).join(', ')}.`
+                  : '';
+              const targetLabel = resolvedTarget.name ?? resolvedTarget.id;
+              const err = new Error(
+                `Cannot close account "${targetLabel}" (${resolvedTarget.id}) with non-zero balance (${decimalBalance}) without specifying transferTo (or transferAccountId).${suggestionSuffix}`,
+              ) as Error & { suggestions?: string[] };
+              if (availableAccounts.length > 0) {
+                err.suggestions = availableAccounts;
+              }
+              throw err;
+            }
+          }
+
+          await apiAdapter.closeAccount(
+            resolvedTarget.id,
+            resolvedTransferTo?.id,
+            resolvedTransferCategory?.id,
+          );
+
+          const targetLabel = resolvedTarget.name ?? resolvedTarget.id;
+          const transferSuffix = resolvedTransferTo
+            ? ` and transferred balance to "${resolvedTransferTo.name ?? resolvedTransferTo.id}" (${resolvedTransferTo.id})`
+            : '';
+
+          return createResourceFacadeResponse({
+            message: `Closed account "${targetLabel}" (${resolvedTarget.id})${transferSuffix}`,
+            data: {
+              id: resolvedTarget.id,
+              closed: true,
+              ...(resolvedTransferTo !== undefined
+                ? { transferAccountId: resolvedTransferTo.id }
+                : {}),
+              ...(resolvedTransferCategory !== undefined
+                ? { transferCategoryId: resolvedTransferCategory.id }
+                : {}),
+            },
+            resolved,
+          });
+        }
+
+        if (input.action === 'reopen') {
+          if (!apiAdapter.reopenAccount) {
+            throw new Error('reopenAccount is not supported by the current API adapter');
+          }
+          const rawTargetInput = input.id ?? input.account ?? input.name;
+          if (!rawTargetInput || !rawTargetInput.trim()) {
+            throw new Error('Account id or name is required when action is "reopen"');
+          }
+
+          const resolvedTarget = await resolveAccount(
+            rawTargetInput,
+            cacheSource,
+            resolved,
+          );
+          await apiAdapter.reopenAccount(resolvedTarget.id);
+
+          const targetLabel = resolvedTarget.name ?? resolvedTarget.id;
+          return createResourceFacadeResponse({
+            message: `Reopened account "${targetLabel}" (${resolvedTarget.id})`,
+            data: {
+              id: resolvedTarget.id,
+              closed: false,
+            },
+            resolved,
+          });
+        }
+
+        throw new Error(`Unsupported manageAccounts action: ${String(input.action)}`);
       });
     },
     async runBankSync(accountId?: string): Promise<RunBankSyncResult> {
@@ -1722,6 +3072,354 @@ export function createActualBudgetGateway(
         await apiAdapter.deleteRule(id);
         return { id };
       });
+    },
+    async manageAutomations(
+      input: ManageAutomationsInput,
+    ): Promise<ResourceFacadeResult<unknown>> {
+      const resolved: Record<string, string> = {};
+
+      if (input.target === 'schedule') {
+        if (input.action === 'create') {
+          const rawAccount = input.account ?? input.accountId;
+          if (!rawAccount) {
+            throw new Error('account or accountId is required when creating a schedule');
+          }
+          if (input.amount === undefined) {
+            throw new Error('amount is required when creating a schedule');
+          }
+          if (input.date === undefined) {
+            throw new Error('date is required when creating a schedule');
+          }
+
+          return executeWrite(async (apiAdapter) => {
+            if (!apiAdapter.createSchedule) {
+              throw new Error('createSchedule is not supported by the current API adapter');
+            }
+            const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+            const resolvedAcct = await resolveAccount(rawAccount, cacheSource, resolved);
+            const rawPayee =
+              input.payee !== undefined ? input.payee : input.payeeId;
+            let resolvedPayeeId: string | null = null;
+            if (typeof rawPayee === 'string' && rawPayee.trim().length > 0) {
+              const resolvedPayee = await resolvePayee(rawPayee, cacheSource, resolved);
+              resolvedPayeeId = resolvedPayee.id;
+            }
+
+            const minorAmount = convertScheduleAmountToMinor(input.amount!);
+            const postsTx =
+              input.postsTransaction ?? input.posts_transaction ?? false;
+            const id = await apiAdapter.createSchedule({
+              ...(input.name !== undefined ? { name: input.name } : {}),
+              account: resolvedAcct.id,
+              payee: resolvedPayeeId,
+              amount: minorAmount,
+              amountOp: input.amountOp ?? 'is',
+              date: input.date,
+              posts_transaction: postsTx,
+            });
+
+            return createResourceFacadeResponse({
+              message: input.name
+                ? `Created schedule "${input.name}" (${id})`
+                : `Created schedule ${id}`,
+              data: {
+                id,
+                ...(input.name !== undefined ? { name: input.name } : {}),
+                account: resolvedAcct.id,
+                payee: resolvedPayeeId,
+                amount: input.amount,
+                amountOp: input.amountOp ?? 'is',
+                date: input.date,
+                posts_transaction: postsTx,
+              },
+              resolved,
+            });
+          });
+        }
+
+        if (input.action === 'update') {
+          const scheduleRef = input.id ?? input.scheduleId;
+          if (!scheduleRef) {
+            throw new Error('id or scheduleId is required when updating a schedule');
+          }
+
+          return executeWrite(async (apiAdapter) => {
+            if (!apiAdapter.updateSchedule) {
+              throw new Error('updateSchedule is not supported by the current API adapter');
+            }
+            const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+            const resolvedSched = await resolveSchedule(scheduleRef, cacheSource, resolved);
+            const scheduleId = resolvedSched.id;
+
+            const internalFields: Record<string, unknown> = {};
+            const externalFields: Record<string, unknown> = {};
+
+            if (input.name !== undefined) {
+              internalFields.name = input.name;
+              externalFields.name = input.name;
+            }
+
+            const rawAccount = input.account ?? input.accountId;
+            if (rawAccount !== undefined) {
+              const resolvedAcct = await resolveAccount(rawAccount, cacheSource, resolved);
+              internalFields.account = resolvedAcct.id;
+              externalFields.account = resolvedAcct.id;
+            }
+
+            const rawPayee =
+              input.payee !== undefined ? input.payee : input.payeeId;
+            if (rawPayee !== undefined) {
+              if (rawPayee === null) {
+                internalFields.payee = null;
+                externalFields.payee = null;
+              } else {
+                const resolvedPayee = await resolvePayee(rawPayee, cacheSource, resolved);
+                internalFields.payee = resolvedPayee.id;
+                externalFields.payee = resolvedPayee.id;
+              }
+            }
+
+            if (input.amount !== undefined) {
+              internalFields.amount = convertScheduleAmountToMinor(input.amount);
+              externalFields.amount = input.amount;
+            }
+            if (input.amountOp !== undefined) {
+              internalFields.amountOp = input.amountOp;
+              externalFields.amountOp = input.amountOp;
+            }
+            if (input.date !== undefined) {
+              internalFields.date = input.date;
+              externalFields.date = input.date;
+            }
+            const postsTx = input.postsTransaction ?? input.posts_transaction;
+            if (postsTx !== undefined) {
+              internalFields.posts_transaction = postsTx;
+              externalFields.posts_transaction = postsTx;
+            }
+
+            await apiAdapter.updateSchedule(
+              scheduleId,
+              internalFields,
+              input.resetNextDate,
+            );
+
+            return createResourceFacadeResponse({
+              message: `Updated schedule ${scheduleId}`,
+              data: {
+                id: scheduleId,
+                ...externalFields,
+              },
+              resolved,
+            });
+          });
+        }
+
+        if (input.action === 'delete') {
+          const scheduleRef = input.id ?? input.scheduleId ?? input.name;
+          if (!scheduleRef) {
+            throw new Error(
+              'id, scheduleId, or name is required when deleting a schedule',
+            );
+          }
+
+          return executeWrite(async (apiAdapter) => {
+            if (!apiAdapter.deleteSchedule) {
+              throw new Error('deleteSchedule is not supported by the current API adapter');
+            }
+            const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+            const resolvedSched = await resolveSchedule(scheduleRef, cacheSource, resolved);
+            await apiAdapter.deleteSchedule(resolvedSched.id);
+
+            return createResourceFacadeResponse({
+              message: `Deleted schedule ${resolvedSched.id}`,
+              data: { id: resolvedSched.id },
+              resolved,
+            });
+          });
+        }
+
+        if (input.action === 'preview_dates') {
+          return executeRead(
+            async (apiAdapter) => {
+              if (!apiAdapter.getScheduleDates) {
+                throw new Error(
+                  'getScheduleDates is not supported by the current API adapter',
+                );
+              }
+
+              const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+              let dateConfig = input.date;
+              let resolvedScheduleId: string | undefined;
+              const scheduleRef = input.id ?? input.scheduleId ?? input.name;
+
+              if (scheduleRef) {
+                const resolvedSched = await resolveSchedule(
+                  scheduleRef,
+                  cacheSource,
+                  resolved,
+                );
+                resolvedScheduleId = resolvedSched.id;
+                if (!dateConfig) {
+                  if (!apiAdapter.getSchedules) {
+                    throw new Error(
+                      'getSchedules is not supported by the current API adapter',
+                    );
+                  }
+                  const rawSchedules = await cacheSource.getSchedules();
+                  const sched = (rawSchedules ?? []).find(
+                    (s) => s.id === resolvedScheduleId,
+                  );
+                  if (!sched) {
+                    throw new Error(`Schedule "${resolvedScheduleId}" not found`);
+                  }
+                  dateConfig = sched.date ?? sched._date;
+                }
+              }
+
+              if (!dateConfig) {
+                throw new Error(
+                  'Either an existing schedule (id, scheduleId, or name) or date configuration must be provided for preview_dates',
+                );
+              }
+
+              const dateOptions: { start?: string; end?: string; count?: number } = {};
+              dateOptions.start =
+                input.start ?? new Date(now()).toISOString().slice(0, 10);
+              if (input.end) {
+                dateOptions.end = input.end;
+              }
+              if (input.count !== undefined) {
+                dateOptions.count = Math.min(Math.max(input.count, 1), 100);
+              } else if (!input.end) {
+                dateOptions.count = 10;
+              }
+
+              const dates = await apiAdapter.getScheduleDates(dateConfig, dateOptions);
+
+              return createResourceFacadeResponse({
+                message: `Calculated ${dates.length} upcoming schedule date(s)`,
+                data: {
+                  ...(resolvedScheduleId ? { scheduleId: resolvedScheduleId } : {}),
+                  dates,
+                },
+                resolved,
+              });
+            },
+            input.forceSync !== undefined ? { forceSync: input.forceSync } : undefined,
+          );
+        }
+      }
+
+      if (input.target === 'rule') {
+        if (input.action === 'create') {
+          if (!input.conditions || input.conditions.length === 0) {
+            throw new Error('conditions are required when creating a rule');
+          }
+          if (!input.actions || input.actions.length === 0) {
+            throw new Error('actions are required when creating a rule');
+          }
+
+          return executeWrite(async (apiAdapter) => {
+            if (!apiAdapter.createRule) {
+              throw new Error('createRule is not supported by the current API adapter');
+            }
+            const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+            const resolvedConditions = await resolveRuleConditionsEntities(
+              input.conditions!,
+              cacheSource,
+              resolved,
+            );
+            const resolvedActions = await resolveRuleActionsEntities(
+              input.actions!,
+              cacheSource,
+              resolved,
+            );
+
+            const payload = {
+              stage: input.stage !== undefined ? input.stage : 'pre',
+              conditionsOp: input.conditionsOp ?? 'and',
+              conditions: convertRuleConditionsToInternal(resolvedConditions),
+              actions: convertRuleActionsToInternal(resolvedActions),
+            };
+            const created = await apiAdapter.createRule(payload);
+            const summary = formatRuleSummary(created);
+
+            return createResourceFacadeResponse({
+              message: `Created automation rule ${summary.id}`,
+              data: summary,
+              resolved,
+            });
+          });
+        }
+
+        if (input.action === 'update') {
+          if (!input.id) {
+            throw new Error('id is required when updating a rule');
+          }
+          if (!input.conditions || input.conditions.length === 0) {
+            throw new Error('conditions are required when updating a rule');
+          }
+          if (!input.actions || input.actions.length === 0) {
+            throw new Error('actions are required when updating a rule');
+          }
+
+          return executeWrite(async (apiAdapter) => {
+            if (!apiAdapter.updateRule) {
+              throw new Error('updateRule is not supported by the current API adapter');
+            }
+            const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+            const resolvedConditions = await resolveRuleConditionsEntities(
+              input.conditions!,
+              cacheSource,
+              resolved,
+            );
+            const resolvedActions = await resolveRuleActionsEntities(
+              input.actions!,
+              cacheSource,
+              resolved,
+            );
+
+            const payload = {
+              id: input.id!,
+              stage: input.stage !== undefined ? input.stage : 'pre',
+              conditionsOp: input.conditionsOp ?? 'and',
+              conditions: convertRuleConditionsToInternal(resolvedConditions),
+              actions: convertRuleActionsToInternal(resolvedActions),
+            };
+            const updated = await apiAdapter.updateRule(payload);
+            const summary = formatRuleSummary(updated);
+
+            return createResourceFacadeResponse({
+              message: `Updated automation rule ${summary.id}`,
+              data: summary,
+              resolved,
+            });
+          });
+        }
+
+        if (input.action === 'delete') {
+          if (!input.id) {
+            throw new Error('id is required when deleting a rule');
+          }
+
+          return executeWrite(async (apiAdapter) => {
+            if (!apiAdapter.deleteRule) {
+              throw new Error('deleteRule is not supported by the current API adapter');
+            }
+            await apiAdapter.deleteRule(input.id!);
+
+            return createResourceFacadeResponse({
+              message: `Deleted automation rule ${input.id}`,
+              data: { id: input.id },
+              resolved,
+            });
+          });
+        }
+      }
+
+      throw new Error(
+        `Unsupported automation target/action combination: ${input.target}/${input.action}`,
+      );
     },
   };
 }

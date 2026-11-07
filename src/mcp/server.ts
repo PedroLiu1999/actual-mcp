@@ -131,7 +131,7 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
   const server = new McpServer(
     {
       name: 'actual-mcp',
-      version: '0.4.6',
+      version: '1.0.0',
       icons,
     },
     {

@@ -366,6 +366,23 @@ export interface DeleteCategoryGroupResult {
   success: boolean;
 }
 
+export type ManageCategoriesAction = 'create' | 'update' | 'delete' | 'move';
+export type ManageCategoriesTarget = 'category' | 'group';
+
+export interface ManageCategoriesInput {
+  action: ManageCategoriesAction;
+  target?: ManageCategoriesTarget;
+  id?: string;
+  name?: string;
+  newName?: string;
+  group?: string;
+  groupId?: string;
+  isIncome?: boolean;
+  hidden?: boolean;
+  transferTo?: string;
+  transferCategoryId?: string;
+}
+
 export interface CreatePayeeInput {
   name: string;
 }
@@ -571,6 +588,7 @@ export interface BudgetGateway {
   createCategoryGroup?(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult>;
   updateCategoryGroup?(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult>;
   deleteCategoryGroup?(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult>;
+  manageCategories?(input: ManageCategoriesInput): Promise<ResourceFacadeResult<unknown>>;
   setBudgetCarryover?(
     month: string,
     categoryId: string,

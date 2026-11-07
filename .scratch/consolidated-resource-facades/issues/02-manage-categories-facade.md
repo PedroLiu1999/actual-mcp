@@ -6,11 +6,11 @@
 
 **Status:** ready-for-agent
 
-- [ ] Exposes a `manage_categories` tool on the MCP server with a discriminated `action` schema supporting `create`, `update`, `delete`, and `move`.
-- [ ] Accepts `target: 'category' | 'group'` (defaulting to `'category'`).
-- [ ] Resolves category and group names to internal UUIDs in-process.
-- [ ] Automatically creates missing parent category groups when creating or moving a category with a new group name.
-- [ ] Enforces safety invariants: deleting non-empty categories or groups requires a `transferTo` destination (name or UUID).
-- [ ] Returns the standardized result envelope with confirmation message and resolved UUIDs.
-- [ ] Declares `destructiveHint: true` on deletion actions.
-- [ ] Contract and unit tests verify creation, auto-group creation, renaming, moving, safe deletion, and error suggestions across the gateway seam.
+- [x] Exposes a `manage_categories` tool on the MCP server with a discriminated `action` schema supporting `create`, `update`, `delete`, and `move`.
+- [x] Accepts `target: 'category' | 'group'` (defaulting to `'category'`).
+- [x] Resolves category and group names to internal UUIDs in-process.
+- [x] Automatically creates missing parent category groups when creating or moving a category with a new group name.
+- [x] Enforces safety invariants: deleting non-empty categories or groups requires a `transferTo` destination (name or UUID).
+- [x] Returns the standardized result envelope with confirmation message and resolved UUIDs.
+- [x] Declares `destructiveHint: true` on deletion actions.
+- [x] Contract and unit tests verify creation, auto-group creation, renaming, moving, safe deletion, and error suggestions across the gateway seam.

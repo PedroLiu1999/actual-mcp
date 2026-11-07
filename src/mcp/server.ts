@@ -6,6 +6,7 @@ import {
   structuredAqlQueryInputSchema,
   structuredAqlQueryObjectSchema,
 } from '../gateway/aql.js';
+import { EntityResolutionError } from '../gateway/resolver.js';
 import type { BudgetGateway } from '../gateway/types.js';
 
 const isoDateSchema = z
@@ -1070,6 +1071,114 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           },
         ],
       };
+    },
+  );
+
+  server.registerTool(
+    'manage_payees',
+    {
+      title: 'Manage Payees',
+      description:
+        'Consolidated Resource Facade for payee lifecycle operations (create, update, delete, merge). Accepts human-readable payee names or internal UUIDs, resolves names in-process against the Budget Cache, and returns a standardized confirmation envelope.',
+      inputSchema: {
+        action: z
+          .enum(['create', 'update', 'delete', 'merge'])
+          .describe(
+            'Lifecycle action to perform on payees: "create", "update", "delete", or "merge".',
+          ),
+        id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target payee UUID or name (for update, delete, or merge target).'),
+        name: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Payee name to create, target payee name to update/delete, or new name when id/payee is supplied.',
+          ),
+        payee: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target payee name or UUID (alias for name/id).'),
+        newName: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('New name to assign when action is "update".'),
+        target: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target payee name or UUID to keep when action is "merge".'),
+        targetId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target payee UUID or name to keep when action is "merge".'),
+        targetPayeeId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Alias for targetId when action is "merge".'),
+        merge: z
+          .array(z.string().min(1))
+          .min(1)
+          .optional()
+          .describe(
+            'Array of duplicate source payee names or UUIDs to merge into the target payee and delete when action is "merge".',
+          ),
+        mergeIds: z
+          .array(z.string().min(1))
+          .min(1)
+          .optional()
+          .describe(
+            'Array of duplicate source payee UUIDs or names to merge into the target payee and delete when action is "merge".',
+          ),
+        sourcePayeeIds: z
+          .array(z.string().min(1))
+          .min(1)
+          .optional()
+          .describe('Alias for mergeIds when action is "merge".'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.managePayees) {
+        throw new Error(
+          'managePayees is not supported by the configured BudgetGateway',
+        );
+      }
+      try {
+        const normalizedInput = stripUndefined(args);
+        const result = await budgetGateway.managePayees(normalizedInput);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        if (error instanceof EntityResolutionError) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(error.toEnvelope(), null, 2),
+              },
+            ],
+          };
+        }
+        throw error;
+      }
     },
   );
 

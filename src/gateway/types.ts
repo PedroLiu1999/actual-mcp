@@ -1,4 +1,5 @@
 import type { AqlQueryResult, StructuredAqlQueryInput } from './aql.js';
+import type { ResourceFacadeResult } from './resolver.js';
 
 export type {
   AqlQueryResult,
@@ -323,6 +324,32 @@ export interface MergePayeesResult {
   mergedCount: number;
 }
 
+export type ManagePayeesAction = 'create' | 'update' | 'delete' | 'merge';
+
+export interface ManagePayeesInput {
+  action: ManagePayeesAction;
+  /** Payee ID or name for update/delete (or target in merge). */
+  id?: string;
+  /** Payee name for create, target payee name/ID for update/delete, or new name when id/payee is supplied in update. */
+  name?: string;
+  /** Alias for payee name or ID in create/update/delete. */
+  payee?: string;
+  /** Explicit new payee name when action is 'update'. */
+  newName?: string;
+  /** Target payee name or UUID to keep when action is 'merge'. */
+  target?: string;
+  /** Target payee name or UUID to keep when action is 'merge'. */
+  targetId?: string;
+  /** Alias for target payee name or UUID when action is 'merge'. */
+  targetPayeeId?: string;
+  /** Array of duplicate payee names or UUIDs to merge into target when action is 'merge'. */
+  merge?: string[];
+  /** Array of duplicate payee names or UUIDs to merge into target when action is 'merge'. */
+  mergeIds?: string[];
+  /** Alias for array of duplicate payee names or UUIDs when action is 'merge'. */
+  sourcePayeeIds?: string[];
+}
+
 export interface RunBankSyncResult {
   updatedAccountIds: string[];
   newTransactionsCount: number;
@@ -456,6 +483,7 @@ export interface BudgetGateway {
   updatePayee?(id: string, fields: { name?: string }): Promise<{ id: string }>;
   deletePayee?(id: string): Promise<{ id: string }>;
   mergePayees?(targetId: string, mergeIds: string[]): Promise<{ targetId: string; mergedCount: number }>;
+  managePayees?(input: ManagePayeesInput): Promise<ResourceFacadeResult<unknown>>;
   createAccount?(
     account: { name: string; type: AccountType; offbudget?: boolean },
     initialBalance?: number,

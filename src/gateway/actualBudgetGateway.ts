@@ -9,6 +9,12 @@ import {
   type AqlQueryResult,
   type StructuredAqlQueryInput,
 } from './aql.js';
+import {
+  createResourceFacadeResponse,
+  resolvePayee,
+  type BudgetCacheSource,
+  type ResourceFacadeResult,
+} from './resolver.js';
 import type {
   AccountSummary,
   AccountType,
@@ -32,6 +38,7 @@ import type {
   DeleteTransactionResult,
   GetSpendingSummaryInput,
   GetTransactionsFilter,
+  ManagePayeesInput,
   PayeeSummary,
   RunBankSyncResult,
   SetBudgetAmountInput,
@@ -326,6 +333,7 @@ export interface ActualBudgetGateway extends BudgetGateway {
     targetId: string,
     mergeIds: string[],
   ): Promise<{ targetId: string; mergedCount: number }>;
+  managePayees(input: ManagePayeesInput): Promise<ResourceFacadeResult<unknown>>;
   createAccount(
     account: { name: string; type: AccountType; offbudget?: boolean },
     initialBalance?: number,
@@ -1459,6 +1467,152 @@ export function createActualBudgetGateway(
         }
         await apiAdapter.mergePayees(targetId, mergeIds);
         return { targetId, mergedCount: mergeIds.length };
+      });
+    },
+    async managePayees(input: ManagePayeesInput): Promise<ResourceFacadeResult<unknown>> {
+      return executeWrite(async (apiAdapter) => {
+        const resolved: Record<string, string> = {};
+        let payeesSnapshot: PayeeSummary[] | null = null;
+
+        const cacheSource: BudgetCacheSource = {
+          listPayees: async () => {
+            if (payeesSnapshot === null) {
+              const rawPayees = (await apiAdapter.getPayees?.()) ?? [];
+              payeesSnapshot = rawPayees.map((payee) => ({
+                id: payee.id,
+                name: payee.name,
+                transfer_acct: payee.transfer_acct ?? null,
+              }));
+            }
+            return payeesSnapshot;
+          },
+        };
+
+        switch (input.action) {
+          case 'create': {
+            const name = (input.name ?? input.payee ?? '').trim();
+            if (!name) {
+              throw new Error('manage_payees create requires a non-empty name');
+            }
+            if (!apiAdapter.createPayee) {
+              throw new Error('createPayee is not supported by the current API adapter');
+            }
+            const id = await apiAdapter.createPayee({ name });
+            return createResourceFacadeResponse({
+              message: `Created payee "${name}" (${id}).`,
+              data: { id, name },
+            });
+          }
+
+          case 'update': {
+            let targetRef: string;
+            let updatedName: string;
+
+            if (input.newName !== undefined) {
+              targetRef = input.id ?? input.payee ?? input.name ?? '';
+              updatedName = input.newName.trim();
+            } else {
+              targetRef = input.id ?? input.payee ?? '';
+              updatedName = (input.name ?? '').trim();
+            }
+
+            if (!targetRef.trim()) {
+              throw new Error('manage_payees update requires a target payee id or name');
+            }
+            if (!updatedName) {
+              throw new Error(
+                'manage_payees update requires a non-empty newName (or name when id/payee is provided)',
+              );
+            }
+            if (!apiAdapter.updatePayee) {
+              throw new Error('updatePayee is not supported by the current API adapter');
+            }
+
+            const targetPayee = await resolvePayee(targetRef, cacheSource, resolved);
+            await apiAdapter.updatePayee(targetPayee.id, { name: updatedName });
+
+            return createResourceFacadeResponse({
+              message: `Updated payee "${targetPayee.name ?? targetRef.trim()}" (${targetPayee.id}) to "${updatedName}".`,
+              data: { id: targetPayee.id, name: updatedName },
+              resolved,
+            });
+          }
+
+          case 'delete': {
+            const targetRef = input.id ?? input.payee ?? input.name ?? '';
+            if (!targetRef.trim()) {
+              throw new Error('manage_payees delete requires a target payee id or name');
+            }
+            if (!apiAdapter.deletePayee) {
+              throw new Error('deletePayee is not supported by the current API adapter');
+            }
+
+            const targetPayee = await resolvePayee(targetRef, cacheSource, resolved);
+            await apiAdapter.deletePayee(targetPayee.id);
+
+            return createResourceFacadeResponse({
+              message: `Deleted payee "${targetPayee.name ?? targetRef.trim()}" (${targetPayee.id}).`,
+              data: { id: targetPayee.id },
+              resolved,
+            });
+          }
+
+          case 'merge': {
+            const targetRef =
+              input.targetId ??
+              input.target ??
+              input.targetPayeeId ??
+              input.id ??
+              input.payee ??
+              input.name ??
+              '';
+            const rawSources = input.mergeIds ?? input.merge ?? input.sourcePayeeIds;
+
+            if (!targetRef.trim()) {
+              throw new Error(
+                'manage_payees merge requires a target payee (target / targetId)',
+              );
+            }
+            if (!Array.isArray(rawSources) || rawSources.length === 0) {
+              throw new Error(
+                'manage_payees merge requires a non-empty array of source payees (merge / mergeIds)',
+              );
+            }
+            if (rawSources.some((s) => typeof s !== 'string' || !s.trim())) {
+              throw new Error(
+                'manage_payees merge requires non-empty source payee identifiers',
+              );
+            }
+            if (!apiAdapter.mergePayees) {
+              throw new Error('mergePayees is not supported by the current API adapter');
+            }
+
+            const targetPayee = await resolvePayee(targetRef, cacheSource, resolved);
+            const resolvedSourceIds: string[] = [];
+
+            for (const sourceRef of rawSources) {
+              const resolvedSource = await resolvePayee(sourceRef, cacheSource, resolved);
+              resolvedSourceIds.push(resolvedSource.id);
+            }
+
+            await apiAdapter.mergePayees(targetPayee.id, resolvedSourceIds);
+
+            return createResourceFacadeResponse({
+              message: `Merged ${resolvedSourceIds.length} payee(s) into "${targetPayee.name ?? targetRef.trim()}" (${targetPayee.id}).`,
+              data: {
+                targetId: targetPayee.id,
+                mergedIds: resolvedSourceIds,
+                mergedCount: resolvedSourceIds.length,
+              },
+              resolved,
+            });
+          }
+
+          default:
+            throw new Error(
+              `Unsupported manage_payees action: ${String((input as { action?: unknown }).action)}`,
+            );
+        }
       });
     },
     async createAccount(

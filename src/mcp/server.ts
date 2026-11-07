@@ -6,7 +6,10 @@ import {
   structuredAqlQueryInputSchema,
   structuredAqlQueryObjectSchema,
 } from '../gateway/aql.js';
-import { EntityResolutionError } from '../gateway/resolver.js';
+import {
+  createResourceFacadeErrorResponse,
+  EntityResolutionError,
+} from '../gateway/resolver.js';
 import type { BudgetGateway } from '../gateway/types.js';
 
 const isoDateSchema = z
@@ -1362,6 +1365,133 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           },
         ],
       };
+    },
+  );
+
+  server.registerTool(
+    'manage_accounts',
+    {
+      title: 'Manage Accounts',
+      description:
+        'Unified Resource Facade for account lifecycle management (create, update, close, reopen). Accepts human-readable names or UUIDs for accounts and transfer categories, and enforces safe balance transfer on closure.',
+      inputSchema: {
+        action: z
+          .enum(['create', 'update', 'close', 'reopen'])
+          .describe(
+            'Account lifecycle operation to perform: "create", "update", "close", or "reopen".',
+          ),
+        id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target account UUID or human-readable name (for update, close, reopen).'),
+        name: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Account name (new account name for create, target account name or updated name for update, or target account name for close/reopen).',
+          ),
+        account: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Alias for target account name or UUID.'),
+        newName: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('New account name when renaming an existing account via action: "update".'),
+        type: z
+          .enum([
+            'checking',
+            'savings',
+            'credit',
+            'investment',
+            'mortgage',
+            'debt',
+            'other',
+          ])
+          .optional()
+          .describe('Type of financial account for action: "create" (default: "checking").'),
+        offbudget: z
+          .boolean()
+          .optional()
+          .describe('Whether the account is off-budget (for create or update).'),
+        initialBalance: z
+          .number()
+          .finite()
+          .optional()
+          .describe('Optional initial balance as a Decimal Amount for action: "create".'),
+        transferTo: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Destination account name or UUID to transfer remaining balance to on action: "close".',
+          ),
+        transferAccountId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Alias for transferTo: destination account UUID or name on action: "close".',
+          ),
+        transferCategory: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Destination category name or UUID for balance transfer across budget boundaries on action: "close".',
+          ),
+        transferCategoryId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Alias for transferCategory: destination category UUID or name on action: "close".',
+          ),
+        forced: z
+          .boolean()
+          .optional()
+          .describe(
+            'Force close an account with a non-zero balance without transferring on action: "close".',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      try {
+        if (!budgetGateway.manageAccounts) {
+          throw new Error(
+            'manageAccounts is not supported by the configured BudgetGateway',
+          );
+        }
+        const normalizedInput = stripUndefined(args);
+        const result = await budgetGateway.manageAccounts(normalizedInput);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        const errorEnvelope = createResourceFacadeErrorResponse(error);
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(errorEnvelope, null, 2),
+            },
+          ],
+        };
+      }
     },
   );
 

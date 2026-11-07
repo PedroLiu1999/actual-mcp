@@ -27,6 +27,24 @@ export type AccountType =
   | 'debt'
   | 'other';
 
+export type ManageAccountAction = 'create' | 'update' | 'close' | 'reopen';
+
+export interface ManageAccountsInput {
+  action: ManageAccountAction;
+  id?: string;
+  name?: string;
+  account?: string;
+  newName?: string;
+  type?: AccountType;
+  offbudget?: boolean;
+  initialBalance?: number;
+  transferTo?: string;
+  transferAccountId?: string;
+  transferCategory?: string;
+  transferCategoryId?: string;
+  forced?: boolean;
+}
+
 export interface AccountSummary {
   id: string;
   name: string;
@@ -498,6 +516,7 @@ export interface BudgetGateway {
     transferCategoryId?: string,
   ): Promise<{ id: string }>;
   reopenAccount?(id: string): Promise<{ id: string }>;
+  manageAccounts?(input: ManageAccountsInput): Promise<ResourceFacadeResult<unknown>>;
   runBankSync?(accountId?: string): Promise<RunBankSyncResult>;
   listSchedules?(options?: { forceSync?: boolean }): Promise<ScheduleSummary[]>;
   getScheduleDates?(input: GetScheduleDatesInput): Promise<string[]>;

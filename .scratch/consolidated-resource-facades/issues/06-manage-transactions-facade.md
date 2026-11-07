@@ -6,11 +6,11 @@
 
 **Status:** ready-for-agent
 
-- [ ] Exposes a `manage_transactions` tool on the MCP server with a discriminated `action` schema supporting `create`, `update`, and `delete`.
-- [ ] For `action: 'create'`, accepts 1 to 50 transaction items with Decimal Amounts, resolving `account`, `category`, and `payee` names in-process, supporting `runRules: true` (default).
-- [ ] For `action: 'update'`, accepts either a single transaction ID or an array of transaction IDs (`ids`) along with fields to update (`date`, `amount`, `category`, `payee`, `notes`, `cleared`).
-- [ ] Automatically resolves `category` and `payee` names to UUIDs in updates; auto-creates the payee if specified by name and not yet present.
-- [ ] For `action: 'delete'`, accepts either a single transaction ID or an array of transaction IDs (`ids`).
-- [ ] Returns the standardized result envelope with confirmation message, updated transaction data, and resolved UUIDs.
-- [ ] Declares `destructiveHint: true` on deletion actions.
-- [ ] Contract and unit tests verify batch creation, single update with name resolution, bulk recategorization across multiple IDs, and batch deletion across the gateway seam.
+- [x] Exposes a `manage_transactions` tool on the MCP server with a discriminated `action` schema supporting `create`, `update`, and `delete`.
+- [x] For `action: 'create'`, accepts 1 to 50 transaction items with Decimal Amounts, resolving `account`, `category`, and `payee` names in-process, supporting `runRules: true` (default).
+- [x] For `action: 'update'`, accepts either a single transaction ID or an array of transaction IDs (`ids`) along with fields to update (`date`, `amount`, `category`, `payee`, `notes`, `cleared`).
+- [x] Automatically resolves `category` and `payee` names to UUIDs in updates; auto-creates the payee if specified by name and not yet present.
+- [x] For `action: 'delete'`, accepts either a single transaction ID or an array of transaction IDs (`ids`).
+- [x] Returns the standardized result envelope with confirmation message, updated transaction data, and resolved UUIDs.
+- [x] Declares `destructiveHint: true` on deletion actions.
+- [x] Contract and unit tests verify batch creation, single update with name resolution, bulk recategorization across multiple IDs, and batch deletion across the gateway seam.

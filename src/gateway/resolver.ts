@@ -284,10 +284,18 @@ export function createResourceFacadeErrorResponse(
     return error.toEnvelope();
   }
   const message = error instanceof Error ? error.message : String(error);
+  const customSuggestions =
+    error !== null &&
+    typeof error === 'object' &&
+    'suggestions' in error &&
+    Array.isArray((error as { suggestions?: unknown }).suggestions)
+      ? ((error as { suggestions: string[] }).suggestions)
+      : undefined;
   return {
     success: false,
     message,
     error: message,
+    ...(customSuggestions !== undefined ? { suggestions: customSuggestions } : {}),
   };
 }
 

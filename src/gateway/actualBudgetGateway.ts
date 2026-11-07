@@ -2,6 +2,13 @@ import fs from 'node:fs';
 import * as actualApi from '@actual-app/api';
 import { decimalToMinorAmount, minorToDecimalAmount, toMinorUnits } from '../currency.js';
 import {
+  createResourceFacadeResponse,
+  resolveAccount,
+  resolveCategory,
+  type BudgetCacheSource,
+  type ResourceFacadeResult,
+} from './resolver.js';
+import {
   collectMonetaryKeys,
   compileStructuredAqlQuery,
   convertAqlRowAmounts,
@@ -32,6 +39,7 @@ import type {
   DeleteTransactionResult,
   GetSpendingSummaryInput,
   GetTransactionsFilter,
+  ManageAccountsInput,
   PayeeSummary,
   RunBankSyncResult,
   SetBudgetAmountInput,
@@ -249,6 +257,7 @@ export interface ActualApiAdapter {
     id: string,
     transferAccountId?: string,
     transferCategoryId?: string,
+    forced?: boolean,
   ): Promise<unknown>;
   reopenAccount?(id: string): Promise<unknown>;
   runBankSync?(args?: { accountId?: string }): Promise<unknown>;
@@ -340,6 +349,7 @@ export interface ActualBudgetGateway extends BudgetGateway {
     transferCategoryId?: string,
   ): Promise<{ id: string }>;
   reopenAccount(id: string): Promise<{ id: string }>;
+  manageAccounts(input: ManageAccountsInput): Promise<ResourceFacadeResult<unknown>>;
   runBankSync(accountId?: string): Promise<RunBankSyncResult>;
   listSchedules(options?: { forceSync?: boolean }): Promise<ScheduleSummary[]>;
   getScheduleDates(input: GetScheduleDatesInput): Promise<string[]>;
@@ -1522,6 +1532,249 @@ export function createActualBudgetGateway(
         }
         await apiAdapter.reopenAccount(id);
         return { id };
+      });
+    },
+    async manageAccounts(input: ManageAccountsInput): Promise<ResourceFacadeResult<unknown>> {
+      return executeWrite(async (apiAdapter) => {
+        const resolved: Record<string, string> = {};
+        let memoizedAccounts: ActualAccountRecord[] | null = null;
+        let memoizedCategoryGroups: ActualCategoryGroupRecord[] | null = null;
+        let memoizedCategories: ActualCategoryRecord[] | null = null;
+
+        const getRawAccounts = async (): Promise<ActualAccountRecord[]> => {
+          if (memoizedAccounts === null) {
+            memoizedAccounts = (await apiAdapter.getAccounts?.()) ?? [];
+          }
+          return memoizedAccounts;
+        };
+
+        const cacheSource: BudgetCacheSource = {
+          getAccounts: getRawAccounts,
+          ...(apiAdapter.getCategoryGroups
+            ? {
+                getCategoryGroups: async () => {
+                  if (memoizedCategoryGroups === null) {
+                    memoizedCategoryGroups =
+                      (await apiAdapter.getCategoryGroups?.()) ?? [];
+                  }
+                  return memoizedCategoryGroups;
+                },
+              }
+            : {}),
+          ...(apiAdapter.getCategories
+            ? {
+                getCategories: async () => {
+                  if (memoizedCategories === null) {
+                    memoizedCategories = (await apiAdapter.getCategories?.()) ?? [];
+                  }
+                  return memoizedCategories;
+                },
+              }
+            : {}),
+        };
+
+        if (input.action === 'create') {
+          if (!apiAdapter.createAccount) {
+            throw new Error('createAccount is not supported by the current API adapter');
+          }
+          const accountName = (input.name ?? input.account ?? '').trim();
+          if (!accountName) {
+            throw new Error('Account name is required when action is "create"');
+          }
+          const accountType: AccountType = input.type ?? 'checking';
+          const minorBalance =
+            input.initialBalance !== undefined
+              ? toMinorUnits(input.initialBalance)
+              : undefined;
+          const id = await apiAdapter.createAccount(
+            {
+              name: accountName,
+              type: accountType,
+              ...(input.offbudget !== undefined ? { offbudget: input.offbudget } : {}),
+            },
+            minorBalance,
+          );
+          return createResourceFacadeResponse({
+            message: `Created account "${accountName}" (${id})`,
+            data: {
+              id,
+              name: accountName,
+              type: accountType,
+              offbudget: Boolean(input.offbudget),
+              ...(input.initialBalance !== undefined
+                ? { initialBalance: input.initialBalance }
+                : {}),
+            },
+          });
+        }
+
+        if (input.action === 'update') {
+          if (!apiAdapter.updateAccount) {
+            throw new Error('updateAccount is not supported by the current API adapter');
+          }
+          const hasExplicitTarget =
+            input.id !== undefined || input.account !== undefined;
+          const targetInput = (
+            hasExplicitTarget ? (input.id ?? input.account) : input.name
+          )?.trim();
+          if (!targetInput) {
+            throw new Error('Account id or name is required when action is "update"');
+          }
+
+          const updatedName = (
+            hasExplicitTarget ? (input.newName ?? input.name) : input.newName
+          )?.trim();
+
+          const fields: { name?: string; offbudget?: boolean } = {};
+          if (updatedName) {
+            fields.name = updatedName;
+          }
+          if (input.offbudget !== undefined) {
+            fields.offbudget = input.offbudget;
+          }
+          if (fields.name === undefined && fields.offbudget === undefined) {
+            throw new Error(
+              'manageAccounts update requires at least one of newName (or name) or offbudget',
+            );
+          }
+
+          const resolvedTarget = await resolveAccount(
+            hasExplicitTarget ? (input.id ?? input.account!) : input.name!,
+            cacheSource,
+            resolved,
+          );
+          await apiAdapter.updateAccount(resolvedTarget.id, fields);
+
+          const displayName =
+            fields.name ?? resolvedTarget.name ?? resolvedTarget.id;
+          return createResourceFacadeResponse({
+            message: `Updated account "${displayName}" (${resolvedTarget.id})`,
+            data: {
+              id: resolvedTarget.id,
+              ...(fields.name !== undefined ? { name: fields.name } : {}),
+              ...(fields.offbudget !== undefined ? { offbudget: fields.offbudget } : {}),
+            },
+            resolved,
+          });
+        }
+
+        if (input.action === 'close') {
+          if (!apiAdapter.closeAccount) {
+            throw new Error('closeAccount is not supported by the current API adapter');
+          }
+          const rawTargetInput = input.id ?? input.account ?? input.name;
+          if (!rawTargetInput || !rawTargetInput.trim()) {
+            throw new Error('Account id or name is required when action is "close"');
+          }
+
+          const resolvedTarget = await resolveAccount(
+            rawTargetInput,
+            cacheSource,
+            resolved,
+          );
+
+          const rawTransferTo = input.transferTo ?? input.transferAccountId;
+          const resolvedTransferTo =
+            rawTransferTo && rawTransferTo.trim()
+              ? await resolveAccount(rawTransferTo, cacheSource, resolved)
+              : undefined;
+
+          const rawTransferCategory =
+            input.transferCategory ?? input.transferCategoryId;
+          const resolvedTransferCategory =
+            rawTransferCategory && rawTransferCategory.trim()
+              ? await resolveCategory(rawTransferCategory, cacheSource, resolved)
+              : undefined;
+
+          if (!resolvedTransferTo && !input.forced) {
+            const minorBalance = await apiAdapter.getAccountBalance(
+              resolvedTarget.id,
+            );
+            if (minorBalance !== 0) {
+              const decimalBalance = minorToDecimalAmount(minorBalance);
+              const rawAccounts = await getRawAccounts();
+              const availableAccounts = rawAccounts
+                .filter((a) => a.id !== resolvedTarget.id && !a.closed)
+                .map((a) => a.name);
+              const suggestionSuffix =
+                availableAccounts.length > 0
+                  ? ` Available destination accounts: ${availableAccounts.map((n) => `"${n}"`).join(', ')}.`
+                  : '';
+              const targetLabel = resolvedTarget.name ?? resolvedTarget.id;
+              const err = new Error(
+                `Cannot close account "${targetLabel}" (${resolvedTarget.id}) with non-zero balance (${decimalBalance}) without specifying transferTo (or transferAccountId).${suggestionSuffix}`,
+              ) as Error & { suggestions?: string[] };
+              if (availableAccounts.length > 0) {
+                err.suggestions = availableAccounts;
+              }
+              throw err;
+            }
+          }
+
+          if (input.forced !== undefined) {
+            await apiAdapter.closeAccount(
+              resolvedTarget.id,
+              resolvedTransferTo?.id,
+              resolvedTransferCategory?.id,
+              input.forced,
+            );
+          } else {
+            await apiAdapter.closeAccount(
+              resolvedTarget.id,
+              resolvedTransferTo?.id,
+              resolvedTransferCategory?.id,
+            );
+          }
+
+          const targetLabel = resolvedTarget.name ?? resolvedTarget.id;
+          const transferSuffix = resolvedTransferTo
+            ? ` and transferred balance to "${resolvedTransferTo.name ?? resolvedTransferTo.id}" (${resolvedTransferTo.id})`
+            : '';
+
+          return createResourceFacadeResponse({
+            message: `Closed account "${targetLabel}" (${resolvedTarget.id})${transferSuffix}`,
+            data: {
+              id: resolvedTarget.id,
+              closed: true,
+              ...(resolvedTransferTo !== undefined
+                ? { transferAccountId: resolvedTransferTo.id }
+                : {}),
+              ...(resolvedTransferCategory !== undefined
+                ? { transferCategoryId: resolvedTransferCategory.id }
+                : {}),
+            },
+            resolved,
+          });
+        }
+
+        if (input.action === 'reopen') {
+          if (!apiAdapter.reopenAccount) {
+            throw new Error('reopenAccount is not supported by the current API adapter');
+          }
+          const rawTargetInput = input.id ?? input.account ?? input.name;
+          if (!rawTargetInput || !rawTargetInput.trim()) {
+            throw new Error('Account id or name is required when action is "reopen"');
+          }
+
+          const resolvedTarget = await resolveAccount(
+            rawTargetInput,
+            cacheSource,
+            resolved,
+          );
+          await apiAdapter.reopenAccount(resolvedTarget.id);
+
+          const targetLabel = resolvedTarget.name ?? resolvedTarget.id;
+          return createResourceFacadeResponse({
+            message: `Reopened account "${targetLabel}" (${resolvedTarget.id})`,
+            data: {
+              id: resolvedTarget.id,
+              closed: false,
+            },
+            resolved,
+          });
+        }
+
+        throw new Error(`Unsupported manageAccounts action: ${String(input.action)}`);
       });
     },
     async runBankSync(accountId?: string): Promise<RunBankSyncResult> {

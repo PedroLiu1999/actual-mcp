@@ -197,6 +197,55 @@ export interface DeleteTransactionResult {
   deleted: TransactionRecord;
 }
 
+export interface ManageTransactionCreateItemInput {
+  date: string;
+  /** Transaction amount expressed as a Decimal Amount (negative for Outflow, positive for Inflow). */
+  amount: number;
+  payee?: string;
+  payeeName?: string;
+  payeeId?: string;
+  category?: string;
+  categoryId?: string;
+  notes?: string;
+  cleared?: boolean;
+  importedId?: string;
+}
+
+export interface ManageTransactionsCreateInput {
+  action: 'create';
+  account?: string;
+  accountId?: string;
+  transactions: ManageTransactionCreateItemInput[];
+  runRules?: boolean;
+}
+
+export interface ManageTransactionsUpdateInput {
+  action: 'update';
+  id?: string;
+  ids?: string[];
+  date?: string;
+  /** Transaction amount expressed as a Decimal Amount (negative for Outflow, positive for Inflow). */
+  amount?: number;
+  payee?: string | null;
+  payeeId?: string | null;
+  payeeName?: string | null;
+  category?: string | null;
+  categoryId?: string | null;
+  notes?: string | null;
+  cleared?: boolean;
+}
+
+export interface ManageTransactionsDeleteInput {
+  action: 'delete';
+  id?: string;
+  ids?: string[];
+}
+
+export type ManageTransactionsInput =
+  | ManageTransactionsCreateInput
+  | ManageTransactionsUpdateInput
+  | ManageTransactionsDeleteInput;
+
 export interface SetBudgetAmountInput {
   month: string;
   categoryId: string;
@@ -483,6 +532,7 @@ export interface BudgetGateway {
   createTransactions?(input: CreateTransactionsInput): Promise<CreateTransactionsResult>;
   updateTransaction?(input: UpdateTransactionInput): Promise<UpdateTransactionResult>;
   deleteTransaction?(id: string): Promise<DeleteTransactionResult>;
+  manageTransactions?(input: ManageTransactionsInput): Promise<ResourceFacadeResult<unknown>>;
   setBudgetAmount?(input: SetBudgetAmountInput): Promise<SetBudgetAmountResult>;
   createCategory?(input: CreateCategoryInput): Promise<CreateCategoryResult>;
   updateCategory?(input: UpdateCategoryInput): Promise<UpdateCategoryResult>;

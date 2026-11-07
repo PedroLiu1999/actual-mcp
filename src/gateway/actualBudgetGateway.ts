@@ -3,6 +3,7 @@ import * as actualApi from '@actual-app/api';
 import { decimalToMinorAmount, minorToDecimalAmount, toMinorUnits } from '../currency.js';
 import {
   createResourceFacadeResponse,
+  EntityResolutionError,
   resolveAccount,
   resolveCategory,
   resolvePayee,
@@ -42,6 +43,7 @@ import type {
   GetTransactionsFilter,
   ManageAccountsInput,
   ManagePayeesInput,
+  ManageTransactionsInput,
   PayeeSummary,
   RunBankSyncResult,
   SetBudgetAmountInput,
@@ -316,6 +318,7 @@ export interface ActualBudgetGateway extends BudgetGateway {
   createTransactions(input: CreateTransactionsInput): Promise<CreateTransactionsResult>;
   updateTransaction(input: UpdateTransactionInput): Promise<UpdateTransactionResult>;
   deleteTransaction(id: string): Promise<DeleteTransactionResult>;
+  manageTransactions(input: ManageTransactionsInput): Promise<ResourceFacadeResult<unknown>>;
   setBudgetAmount(input: SetBudgetAmountInput): Promise<SetBudgetAmountResult>;
   createCategory(input: CreateCategoryInput): Promise<CreateCategoryResult>;
   updateCategory(input: UpdateCategoryInput): Promise<UpdateCategoryResult>;
@@ -1263,6 +1266,385 @@ export function createActualBudgetGateway(
         await apiAdapter.deleteTransaction(id);
         return { deleted };
       });
+    },
+    async manageTransactions(
+      input: ManageTransactionsInput,
+    ): Promise<ResourceFacadeResult<unknown>> {
+      if (input.action === 'create') {
+        if (input.transactions.length < 1 || input.transactions.length > 50) {
+          throw new Error('manageTransactions create requires between 1 and 50 transactions');
+        }
+        const rawAccount = input.account ?? input.accountId;
+        if (!rawAccount || rawAccount.trim().length === 0) {
+          throw new Error('manageTransactions create requires account or accountId');
+        }
+
+        return executeWrite(async (apiAdapter) => {
+          const resolved: Record<string, string> = {};
+          let memoAccounts: ActualAccountRecord[] | null = null;
+          let memoGroups: ActualCategoryGroupRecord[] | null = null;
+          let memoCategories: ActualCategoryRecord[] | null = null;
+          let memoPayees: ActualPayeeRecord[] | null = null;
+
+          const cacheSource: BudgetCacheSource = {
+            getAccounts: async () => {
+              if (!memoAccounts) {
+                memoAccounts = (await apiAdapter.getAccounts?.()) ?? [];
+              }
+              return memoAccounts;
+            },
+            ...(apiAdapter.getCategoryGroups
+              ? {
+                  getCategoryGroups: async () => {
+                    if (!memoGroups) {
+                      memoGroups = (await apiAdapter.getCategoryGroups?.()) ?? [];
+                    }
+                    return memoGroups;
+                  },
+                }
+              : {}),
+            ...(apiAdapter.getCategories
+              ? {
+                  getCategories: async () => {
+                    if (!memoCategories) {
+                      memoCategories = (await apiAdapter.getCategories?.()) ?? [];
+                    }
+                    return memoCategories;
+                  },
+                }
+              : {}),
+            getPayees: async () => {
+              if (!memoPayees) {
+                memoPayees = (await apiAdapter.getPayees?.()) ?? [];
+              }
+              return memoPayees;
+            },
+          };
+
+          const resolvedAccount = await resolveAccount(rawAccount, cacheSource, resolved);
+          const mappedTransactions: ActualImportTransactionInput[] = [];
+
+          for (const tx of input.transactions) {
+            let payeeId: string | undefined;
+            let payeeName: string | undefined;
+
+            if (tx.payeeId !== undefined) {
+              const resolvedPayee = await resolvePayee(tx.payeeId, cacheSource, resolved);
+              payeeId = resolvedPayee.id;
+            } else {
+              const rawPayee = tx.payee ?? tx.payeeName;
+              if (rawPayee !== undefined) {
+                try {
+                  const resolvedPayee = await resolvePayee(rawPayee, cacheSource, resolved);
+                  payeeId = resolvedPayee.id;
+                } catch (err) {
+                  if (err instanceof EntityResolutionError) {
+                    payeeName = rawPayee;
+                  } else {
+                    throw err;
+                  }
+                }
+              }
+            }
+
+            let categoryId: string | undefined;
+            const rawCategory = tx.category ?? tx.categoryId;
+            if (rawCategory !== undefined) {
+              const resolvedCat = await resolveCategory(rawCategory, cacheSource, resolved);
+              categoryId = resolvedCat.id;
+            }
+
+            mappedTransactions.push({
+              account: resolvedAccount.id,
+              date: tx.date,
+              amount: decimalToMinorAmount(tx.amount),
+              ...(payeeId !== undefined ? { payee: payeeId } : {}),
+              ...(payeeName !== undefined ? { payee_name: payeeName } : {}),
+              ...(categoryId !== undefined ? { category: categoryId } : {}),
+              ...(tx.notes !== undefined ? { notes: tx.notes } : {}),
+              ...(tx.cleared !== undefined ? { cleared: tx.cleared } : {}),
+              ...(tx.importedId !== undefined ? { imported_id: tx.importedId } : {}),
+            });
+          }
+
+          const runRules = input.runRules ?? true;
+          const count = mappedTransactions.length;
+          const noun = count === 1 ? 'transaction' : 'transactions';
+
+          if (runRules) {
+            if (!apiAdapter.importTransactions) {
+              throw new Error(
+                'importTransactions is not supported by the current API adapter',
+              );
+            }
+            const result = await apiAdapter.importTransactions(
+              resolvedAccount.id,
+              mappedTransactions,
+            );
+            return createResourceFacadeResponse({
+              message: `Created ${count} ${noun} in account "${resolvedAccount.id}".`,
+              data: {
+                accountId: resolvedAccount.id,
+                mode: 'import' as const,
+                added: result?.added ?? [],
+                updated: result?.updated ?? [],
+                errors: result?.errors ?? [],
+              },
+              resolved,
+            });
+          }
+
+          if (!apiAdapter.addTransactions) {
+            throw new Error(
+              'addTransactions is not supported by the current API adapter',
+            );
+          }
+          await apiAdapter.addTransactions(resolvedAccount.id, mappedTransactions);
+          return createResourceFacadeResponse({
+            message: `Created ${count} ${noun} in account "${resolvedAccount.id}".`,
+            data: {
+              accountId: resolvedAccount.id,
+              mode: 'add' as const,
+              added: [],
+              updated: [],
+              errors: [],
+            },
+            resolved,
+          });
+        });
+      }
+
+      if (input.action === 'update') {
+        const targetIds =
+          input.ids !== undefined && input.ids.length > 0
+            ? input.ids
+            : input.id !== undefined
+              ? [input.id]
+              : [];
+
+        if (targetIds.length < 1 || targetIds.length > 50) {
+          throw new Error(
+            'manageTransactions update requires between 1 and 50 transaction IDs',
+          );
+        }
+
+        return executeWrite(async (apiAdapter) => {
+          if (!apiAdapter.updateTransaction) {
+            throw new Error(
+              'updateTransaction is not supported by the current API adapter',
+            );
+          }
+
+          const beforeRecords = await fetchEnrichedTransactions(apiAdapter);
+          const previousRecords: TransactionRecord[] = [];
+          for (const targetId of targetIds) {
+            const found = findTransactionById(beforeRecords, targetId);
+            if (!found) {
+              throw new Error(`Transaction not found: ${targetId}`);
+            }
+            previousRecords.push(found);
+          }
+
+          const resolved: Record<string, string> = {};
+          let memoGroups: ActualCategoryGroupRecord[] | null = null;
+          let memoCategories: ActualCategoryRecord[] | null = null;
+          let memoPayees: ActualPayeeRecord[] | null = null;
+
+          const cacheSource: BudgetCacheSource = {
+            ...(apiAdapter.getCategoryGroups
+              ? {
+                  getCategoryGroups: async () => {
+                    if (!memoGroups) {
+                      memoGroups = (await apiAdapter.getCategoryGroups?.()) ?? [];
+                    }
+                    return memoGroups;
+                  },
+                }
+              : {}),
+            ...(apiAdapter.getCategories
+              ? {
+                  getCategories: async () => {
+                    if (!memoCategories) {
+                      memoCategories = (await apiAdapter.getCategories?.()) ?? [];
+                    }
+                    return memoCategories;
+                  },
+                }
+              : {}),
+            getPayees: async () => {
+              if (!memoPayees) {
+                memoPayees = (await apiAdapter.getPayees?.()) ?? [];
+              }
+              return memoPayees;
+            },
+          };
+
+          const fields: Record<string, unknown> = {};
+          let resolvedPayeeId: string | null | undefined;
+          let resolvedCategoryId: string | null | undefined;
+
+          if (input.date !== undefined) {
+            fields.date = input.date;
+          }
+          if (input.amount !== undefined) {
+            fields.amount = decimalToMinorAmount(input.amount);
+          }
+
+          const hasPayeeUpdate =
+            input.payee !== undefined ||
+            input.payeeId !== undefined ||
+            input.payeeName !== undefined;
+          if (hasPayeeUpdate) {
+            const rawPayee =
+              input.payee !== undefined
+                ? input.payee
+                : input.payeeId !== undefined
+                  ? input.payeeId
+                  : input.payeeName;
+            if (rawPayee === null) {
+              resolvedPayeeId = null;
+              fields.payee = null;
+            } else if (rawPayee !== undefined) {
+              try {
+                const resolvedPayee = await resolvePayee(
+                  rawPayee,
+                  cacheSource,
+                  resolved,
+                );
+                resolvedPayeeId = resolvedPayee.id;
+                fields.payee = resolvedPayee.id;
+              } catch (err) {
+                if (err instanceof EntityResolutionError) {
+                  if (!apiAdapter.createPayee) {
+                    throw err;
+                  }
+                  const createdPayeeId = await apiAdapter.createPayee({
+                    name: rawPayee.trim(),
+                  });
+                  resolved[rawPayee] = createdPayeeId;
+                  const currentPayees = memoPayees as ActualPayeeRecord[] | null;
+                  if (currentPayees) {
+                    currentPayees.push({ id: createdPayeeId, name: rawPayee.trim() });
+                  }
+                  resolvedPayeeId = createdPayeeId;
+                  fields.payee = createdPayeeId;
+                } else {
+                  throw err;
+                }
+              }
+            }
+          }
+
+          const hasCategoryUpdate =
+            input.category !== undefined || input.categoryId !== undefined;
+          if (hasCategoryUpdate) {
+            const rawCategory =
+              input.category !== undefined ? input.category : input.categoryId;
+            if (rawCategory === null) {
+              resolvedCategoryId = null;
+              fields.category = null;
+            } else if (rawCategory !== undefined) {
+              const resolvedCategory = await resolveCategory(
+                rawCategory,
+                cacheSource,
+                resolved,
+              );
+              resolvedCategoryId = resolvedCategory.id;
+              fields.category = resolvedCategory.id;
+            }
+          }
+
+          if (input.notes !== undefined) {
+            fields.notes = input.notes;
+          }
+          if (input.cleared !== undefined) {
+            fields.cleared = input.cleared;
+          }
+
+          for (const targetId of targetIds) {
+            await apiAdapter.updateTransaction(targetId, fields);
+          }
+
+          const afterRecords = await fetchEnrichedTransactions(apiAdapter);
+          const updatedRecords: TransactionRecord[] = targetIds.map((targetId, idx) => {
+            const previous = previousRecords[idx]!;
+            return (
+              findTransactionById(afterRecords, targetId) ?? {
+                ...previous,
+                ...(input.date !== undefined ? { date: input.date } : {}),
+                ...(input.amount !== undefined ? { amount: input.amount } : {}),
+                ...(resolvedPayeeId !== undefined
+                  ? { payee: resolvedPayeeId, payeeId: resolvedPayeeId }
+                  : {}),
+                ...(resolvedCategoryId !== undefined
+                  ? { category: resolvedCategoryId, categoryId: resolvedCategoryId }
+                  : {}),
+                ...(input.notes !== undefined ? { notes: input.notes } : {}),
+                ...(input.cleared !== undefined ? { cleared: input.cleared } : {}),
+              }
+            );
+          });
+
+          const count = updatedRecords.length;
+          const noun = count === 1 ? 'transaction' : 'transactions';
+          return createResourceFacadeResponse({
+            message: `Updated ${count} ${noun}.`,
+            data: {
+              updated: updatedRecords,
+              previous: previousRecords,
+            },
+            resolved,
+          });
+        });
+      }
+
+      if (input.action === 'delete') {
+        const targetIds =
+          input.ids !== undefined && input.ids.length > 0
+            ? input.ids
+            : input.id !== undefined
+              ? [input.id]
+              : [];
+
+        if (targetIds.length < 1 || targetIds.length > 50) {
+          throw new Error(
+            'manageTransactions delete requires between 1 and 50 transaction IDs',
+          );
+        }
+
+        return executeWrite(async (apiAdapter) => {
+          if (!apiAdapter.deleteTransaction) {
+            throw new Error(
+              'deleteTransaction is not supported by the current API adapter',
+            );
+          }
+
+          const beforeRecords = await fetchEnrichedTransactions(apiAdapter);
+          const deletedRecords: TransactionRecord[] = [];
+          for (const targetId of targetIds) {
+            const found = findTransactionById(beforeRecords, targetId);
+            if (!found) {
+              throw new Error(`Transaction not found: ${targetId}`);
+            }
+            deletedRecords.push(found);
+          }
+
+          for (const targetId of targetIds) {
+            await apiAdapter.deleteTransaction(targetId);
+          }
+
+          const count = deletedRecords.length;
+          const noun = count === 1 ? 'transaction' : 'transactions';
+          return createResourceFacadeResponse({
+            message: `Deleted ${count} ${noun}.`,
+            data: {
+              deleted: deletedRecords,
+            },
+          });
+        });
+      }
+
+      throw new Error(`Unsupported manageTransactions action: ${(input as { action: string }).action}`);
     },
     async setBudgetAmount(
       input: SetBudgetAmountInput,

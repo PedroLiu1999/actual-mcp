@@ -10,7 +10,7 @@ import {
   createResourceFacadeErrorResponse,
   EntityResolutionError,
 } from '../gateway/resolver.js';
-import type { BudgetGateway } from '../gateway/types.js';
+import type { BudgetGateway, ManageTransactionsInput } from '../gateway/types.js';
 
 const isoDateSchema = z
   .string()
@@ -634,6 +634,218 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           },
         ],
       };
+    },
+  );
+
+  const manageTransactionItemSchema = z.object({
+    date: isoDateSchema.describe('Transaction date in YYYY-MM-DD format.'),
+    amount: z
+      .number()
+      .finite()
+      .describe(
+        'Transaction amount as a Decimal Amount (negative for Outflow/expense e.g. -12.34, positive for Inflow/income e.g. 100.00).',
+      ),
+    payee: z
+      .string()
+      .optional()
+      .describe('Payee name or UUID to match or create.'),
+    payeeName: z
+      .string()
+      .optional()
+      .describe('Payee name to match or create when importing transactions.'),
+    payeeId: z
+      .string()
+      .optional()
+      .describe('Existing payee UUID to assign to the transaction.'),
+    category: z
+      .string()
+      .optional()
+      .describe('Category name or UUID to assign to the transaction.'),
+    categoryId: z
+      .string()
+      .optional()
+      .describe('Category UUID to assign to the transaction.'),
+    notes: z.string().optional().describe('Optional transaction notes.'),
+    cleared: z
+      .boolean()
+      .optional()
+      .describe('Whether the transaction is cleared.'),
+    importedId: z
+      .string()
+      .optional()
+      .describe('Optional unique imported_id for deduplication.'),
+  });
+
+  server.registerTool(
+    'manage_transactions',
+    {
+      title: 'Manage Transactions',
+      description:
+        'Consolidated Resource Facade for transaction lifecycle operations (action: "create" | "update" | "delete"). Supports batch creation (1-50 items with Decimal Amounts, in-process account/category/payee name resolution, and runRules default true), single or bulk updates across 1-50 transaction IDs with automatic creation of new payees, and single or bulk deletions.',
+      inputSchema: {
+        action: z
+          .enum(['create', 'update', 'delete'])
+          .describe('Transaction lifecycle operation to perform.'),
+        account: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target account name or UUID (for action: "create").'),
+        accountId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target account UUID or name (for action: "create").'),
+        transactions: z
+          .array(manageTransactionItemSchema)
+          .min(1, 'At least 1 transaction is required')
+          .max(50, 'At most 50 transactions can be created per call')
+          .optional()
+          .describe('Batch of 1 to 50 transactions to create (for action: "create").'),
+        runRules: z
+          .boolean()
+          .optional()
+          .describe(
+            'When true (default for action: "create"), uses importTransactions to match/create payees and run Actual rules; when false, uses addTransactions.',
+          ),
+        id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Single target transaction UUID (for action: "update" or "delete").'),
+        ids: z
+          .array(z.string().min(1))
+          .min(1, 'At least 1 transaction ID is required')
+          .max(50, 'At most 50 transaction IDs can be processed per call')
+          .optional()
+          .describe('Batch of 1 to 50 transaction UUIDs (for action: "update" or "delete").'),
+        date: isoDateSchema
+          .optional()
+          .describe('New transaction date in YYYY-MM-DD format (for action: "update").'),
+        amount: z
+          .number()
+          .finite()
+          .optional()
+          .describe(
+            'New transaction amount as a Decimal Amount (negative for Outflow, positive for Inflow) (for action: "update").',
+          ),
+        payee: z
+          .string()
+          .nullable()
+          .optional()
+          .describe(
+            'New payee name or UUID (auto-created if name does not exist), or null to clear (for action: "update").',
+          ),
+        payeeId: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('New payee UUID or name, or null to clear (for action: "update").'),
+        payeeName: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('New payee name, or null to clear (for action: "update").'),
+        category: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('New category name or UUID, or null to clear (for action: "update").'),
+        categoryId: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('New category UUID or name, or null to clear (for action: "update").'),
+        notes: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('New transaction notes, or null to clear (for action: "update").'),
+        cleared: z
+          .boolean()
+          .optional()
+          .describe('New cleared status (for action: "update").'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.manageTransactions) {
+        throw new Error(
+          'manageTransactions is not supported by the configured BudgetGateway',
+        );
+      }
+
+      let normalizedInput: ManageTransactionsInput;
+      if (args.action === 'create') {
+        if (!args.account && !args.accountId) {
+          throw new Error('manage_transactions create requires account or accountId');
+        }
+        if (!args.transactions || args.transactions.length === 0) {
+          throw new Error('manage_transactions create requires a non-empty transactions array');
+        }
+        normalizedInput = stripUndefined({
+          action: 'create' as const,
+          account: args.account,
+          accountId: args.accountId,
+          transactions: args.transactions.map((item) => stripUndefined(item)),
+          runRules: args.runRules ?? true,
+        });
+      } else if (args.action === 'update') {
+        if (!args.id && (!args.ids || args.ids.length === 0)) {
+          throw new Error('manage_transactions update requires id or ids');
+        }
+        normalizedInput = stripUndefined({
+          action: 'update' as const,
+          id: args.id,
+          ids: args.ids,
+          date: args.date,
+          amount: args.amount,
+          payee: args.payee,
+          payeeId: args.payeeId,
+          payeeName: args.payeeName,
+          category: args.category,
+          categoryId: args.categoryId,
+          notes: args.notes,
+          cleared: args.cleared,
+        });
+      } else {
+        if (!args.id && (!args.ids || args.ids.length === 0)) {
+          throw new Error('manage_transactions delete requires id or ids');
+        }
+        normalizedInput = stripUndefined({
+          action: 'delete' as const,
+          id: args.id,
+          ids: args.ids,
+        });
+      }
+
+      try {
+        const result = await budgetGateway.manageTransactions(normalizedInput);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        if (error instanceof EntityResolutionError) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(createResourceFacadeErrorResponse(error), null, 2),
+              },
+            ],
+          };
+        }
+        throw error;
+      }
     },
   );
 

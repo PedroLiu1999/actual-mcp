@@ -4,13 +4,13 @@
 
 **Blocked by:** 01: In-Process Identifier Resolution & Standardized Response Envelope
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Exposes a `manage_automations` tool on the MCP server with a discriminated `target: 'schedule' | 'rule'` and `action: 'create' | 'update' | 'delete' | 'preview_dates'`.
-- [ ] For `target: 'schedule'`, supports interval recurrence configurations, next occurrence dates, linked account/payee by name or UUID, and Decimal Amounts.
-- [ ] For `target: 'schedule'` with `action: 'preview_dates'`, calculates upcoming occurrence dates for an existing schedule or an explicit recurrence configuration.
-- [ ] For `target: 'rule'`, supports transaction pipeline stages (`pre`, `post`, `default`), condition sets, and action sets with Decimal Amounts.
-- [ ] Resolves linked payee and account names in schedules and rule conditions/actions to UUIDs in-process.
-- [ ] Returns the standardized result envelope with confirmation message and resolved UUIDs.
-- [ ] Declares `destructiveHint: true` on deletion actions.
-- [ ] Contract and unit tests verify schedule creation/updating/preview and rule creation/updating across the gateway seam.
+- [x] Exposes a `manage_automations` tool on the MCP server with a discriminated `target: 'schedule' | 'rule'` and `action: 'create' | 'update' | 'delete' | 'preview_dates'`.
+- [x] For `target: 'schedule'`, supports interval recurrence configurations, next occurrence dates, linked account/payee by name or UUID, and Decimal Amounts.
+- [x] For `target: 'schedule'` with `action: 'preview_dates'`, calculates upcoming occurrence dates for an existing schedule or an explicit recurrence configuration.
+- [x] For `target: 'rule'`, supports transaction pipeline stages (`pre`, `post`, `default`), condition sets, and action sets with Decimal Amounts.
+- [x] Resolves linked payee and account names in schedules and rule conditions/actions to UUIDs in-process.
+- [x] Returns the standardized result envelope with confirmation message and resolved UUIDs.
+- [x] Declares `destructiveHint: true` on deletion actions.
+- [x] Contract and unit tests verify schedule creation/updating/preview and rule creation/updating across the gateway seam.

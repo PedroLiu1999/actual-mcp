@@ -1814,5 +1814,157 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     },
   );
 
+  server.registerTool(
+    'manage_automations',
+    {
+      title: 'Manage Automations (Schedules & Rules)',
+      description:
+        'Consolidated Resource Facade for recurring schedules and automation rules, discriminated by target ("schedule" | "rule") and action ("create" | "update" | "delete" | "preview_dates"). Resolves human-readable account, payee, category, and schedule names to UUIDs in-process and uses Decimal Amounts.',
+      inputSchema: {
+        target: z
+          .enum(['schedule', 'rule'])
+          .describe('Target automation type: "schedule" or "rule".'),
+        action: z
+          .enum(['create', 'update', 'delete', 'preview_dates'])
+          .describe(
+            'Lifecycle action to perform: "create", "update", "delete", or "preview_dates" (schedule only).',
+          ),
+        id: z
+          .string()
+          .optional()
+          .describe(
+            'Schedule ID (or existing schedule name) or Rule ID for update, delete, or preview_dates.',
+          ),
+        scheduleId: z
+          .string()
+          .optional()
+          .describe(
+            'Schedule ID (or existing schedule name) for preview_dates, update, or delete.',
+          ),
+        name: z
+          .string()
+          .optional()
+          .describe(
+            'Display name for schedule create/update, or existing schedule name for delete/preview_dates.',
+          ),
+        account: z
+          .string()
+          .optional()
+          .describe('Account name or UUID for schedule create/update.'),
+        accountId: z
+          .string()
+          .optional()
+          .describe('Alias for account (name or UUID) for schedule create/update.'),
+        payee: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('Payee name or UUID (or null to clear) for schedule create/update.'),
+        payeeId: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('Alias for payee (name or UUID, or null to clear) for schedule create/update.'),
+        amount: scheduleAmountSchema
+          .optional()
+          .describe(
+            'Schedule monetary amount as a Decimal Amount (negative for Outflow, positive for Inflow) or { num1, num2 } range.',
+          ),
+        amountOp: z
+          .enum(['is', 'isapprox', 'isbetween'])
+          .optional()
+          .describe('Schedule amount match operator: "is", "isapprox", or "isbetween".'),
+        date: scheduleDateSchema
+          .optional()
+          .describe(
+            'Schedule recurrence config object (e.g. { frequency: "monthly", start: "2026-11-01" }) or exact YYYY-MM-DD date.',
+          ),
+        postsTransaction: z
+          .boolean()
+          .optional()
+          .describe(
+            'Whether Actual should automatically post transactions for this schedule (default: false).',
+          ),
+        posts_transaction: z
+          .boolean()
+          .optional()
+          .describe('Alias for postsTransaction.'),
+        resetNextDate: z
+          .boolean()
+          .optional()
+          .describe(
+            'When updating a schedule, recalculate next occurrence date based on current day and date pattern.',
+          ),
+        start: isoDateSchema
+          .optional()
+          .describe('Inclusive start date in YYYY-MM-DD format for preview_dates (defaults to today).'),
+        end: isoDateSchema
+          .optional()
+          .describe('Inclusive end date in YYYY-MM-DD format for preview_dates.'),
+        count: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe(
+            'Number of upcoming occurrences to calculate for preview_dates (default 10, max 100).',
+          ),
+        forceSync: z
+          .boolean()
+          .optional()
+          .describe('Force a sync with the Sync Server before preview_dates.'),
+        stage: z
+          .enum(['pre', 'post', 'default'])
+          .nullable()
+          .optional()
+          .describe(
+            'Rule execution stage: "pre" (import/creation), "post", or "default" (or null for default).',
+          ),
+        conditionsOp: z
+          .enum(['and', 'or'])
+          .optional()
+          .describe(
+            'Rule condition combination operator: "and" (all must match) or "or" (any must match). Default: "and".',
+          ),
+        conditions: z
+          .array(ruleConditionSchema)
+          .min(1)
+          .optional()
+          .describe(
+            'List of rule conditions (supports human-readable names for payee, account, and category fields, and Decimal Amounts for amount).',
+          ),
+        actions: z
+          .array(ruleActionSchema)
+          .min(1)
+          .optional()
+          .describe(
+            'List of rule actions (supports human-readable names for payee, account, and category fields, and Decimal Amounts for monetary actions).',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.manageAutomations) {
+        throw new Error(
+          'manageAutomations is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.manageAutomations(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
   return server;
 }

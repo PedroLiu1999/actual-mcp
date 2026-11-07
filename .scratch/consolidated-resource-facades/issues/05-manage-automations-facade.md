@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: In-Process Identifier Resolution & Standardized Response Envelope
 
-**Status:** done
+**Status:** resolved
 
 - [x] Exposes a `manage_automations` tool on the MCP server with a discriminated `target: 'schedule' | 'rule'` and `action: 'create' | 'update' | 'delete' | 'preview_dates'`.
 - [x] For `target: 'schedule'`, supports interval recurrence configurations, next occurrence dates, linked account/payee by name or UUID, and Decimal Amounts.

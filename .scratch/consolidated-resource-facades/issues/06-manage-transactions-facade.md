@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: In-Process Identifier Resolution & Standardized Response Envelope
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Exposes a `manage_transactions` tool on the MCP server with a discriminated `action` schema supporting `create`, `update`, and `delete`.
 - [x] For `action: 'create'`, accepts 1 to 50 transaction items with Decimal Amounts, resolving `account`, `category`, and `payee` names in-process, supporting `runRules: true` (default).

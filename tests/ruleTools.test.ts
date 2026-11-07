@@ -49,7 +49,7 @@ afterEach(() => {
 });
 
 describe('Rule MCP Tools HTTP Seam', () => {
-  it('exposes rule tools with correct annotations on tools/list', async () => {
+  it('exposes list_rules and manage_automations on tools/list and omits retired shallow rule tools', async () => {
     const gateway = createStubGateway();
     const app = createApp({ config: testConfig, budgetGateway: gateway });
     const token = await issueBearerToken(app);
@@ -80,26 +80,16 @@ describe('Rule MCP Tools HTTP Seam', () => {
       destructiveHint: false,
     });
 
-    const createRule = tools.find((t) => t.name === 'create_rule');
-    expect(createRule).toBeDefined();
-    expect(createRule?.annotations).toEqual({
-      readOnlyHint: false,
-      destructiveHint: false,
-    });
-
-    const updateRule = tools.find((t) => t.name === 'update_rule');
-    expect(updateRule).toBeDefined();
-    expect(updateRule?.annotations).toEqual({
-      readOnlyHint: false,
-      destructiveHint: false,
-    });
-
-    const deleteRule = tools.find((t) => t.name === 'delete_rule');
-    expect(deleteRule).toBeDefined();
-    expect(deleteRule?.annotations).toEqual({
+    const manageAutomations = tools.find((t) => t.name === 'manage_automations');
+    expect(manageAutomations).toBeDefined();
+    expect(manageAutomations?.annotations).toEqual({
       readOnlyHint: false,
       destructiveHint: true,
     });
+
+    for (const retiredTool of ['create_rule', 'update_rule', 'delete_rule']) {
+      expect(tools.find((t) => t.name === retiredTool)).toBeUndefined();
+    }
   });
 
   it('handles list_rules tool call with optional payeeId', async () => {
@@ -144,124 +134,6 @@ describe('Rule MCP Tools HTTP Seam', () => {
     const parsed = JSON.parse(res.body.result.content[0].text);
     expect(parsed.rules).toHaveLength(1);
     expect(parsed.rules[0].id).toBe('rule-1');
-  });
-
-  it('handles create_rule tool call', async () => {
-    const createRuleFn = vi.fn().mockResolvedValue({
-      id: 'rule-new-1',
-      stage: 'pre',
-      conditionsOp: 'and',
-      conditions: [{ field: 'payee', op: 'is', value: 'payee-starbucks' }],
-      actions: [{ field: 'category', op: 'set', value: 'cat-coffee' }],
-    });
-
-    const gateway = createStubGateway({ createRule: createRuleFn });
-    const app = createApp({ config: testConfig, budgetGateway: gateway });
-    const token = await issueBearerToken(app);
-
-    const res = await request(app)
-      .post('/mcp')
-      .set('Host', 'mcp.example.com')
-      .set('Authorization', `Bearer ${token}`)
-      .set('Accept', 'application/json, text/event-stream')
-      .set('Content-Type', 'application/json')
-      .send({
-        jsonrpc: '2.0',
-        id: 3,
-        method: 'tools/call',
-        params: {
-          name: 'create_rule',
-          arguments: {
-            stage: 'pre',
-            conditionsOp: 'and',
-            conditions: [{ field: 'payee', op: 'is', value: 'payee-starbucks' }],
-            actions: [{ field: 'category', op: 'set', value: 'cat-coffee' }],
-          },
-        },
-      });
-
-    expect(res.status).toBe(200);
-    expect(createRuleFn).toHaveBeenCalledWith({
-      stage: 'pre',
-      conditionsOp: 'and',
-      conditions: [{ field: 'payee', op: 'is', value: 'payee-starbucks' }],
-      actions: [{ field: 'category', op: 'set', value: 'cat-coffee' }],
-    });
-    const parsed = JSON.parse(res.body.result.content[0].text);
-    expect(parsed.rule.id).toBe('rule-new-1');
-  });
-
-  it('handles update_rule tool call', async () => {
-    const updateRuleFn = vi.fn().mockResolvedValue({
-      id: 'rule-1',
-      stage: 'pre',
-      conditionsOp: 'and',
-      conditions: [{ field: 'payee', op: 'is', value: 'payee-1' }],
-      actions: [{ field: 'notes', op: 'set', value: 'Categorized' }],
-    });
-
-    const gateway = createStubGateway({ updateRule: updateRuleFn });
-    const app = createApp({ config: testConfig, budgetGateway: gateway });
-    const token = await issueBearerToken(app);
-
-    const res = await request(app)
-      .post('/mcp')
-      .set('Host', 'mcp.example.com')
-      .set('Authorization', `Bearer ${token}`)
-      .set('Accept', 'application/json, text/event-stream')
-      .set('Content-Type', 'application/json')
-      .send({
-        jsonrpc: '2.0',
-        id: 4,
-        method: 'tools/call',
-        params: {
-          name: 'update_rule',
-          arguments: {
-            id: 'rule-1',
-            conditions: [{ field: 'payee', op: 'is', value: 'payee-1' }],
-            actions: [{ field: 'notes', op: 'set', value: 'Categorized' }],
-          },
-        },
-      });
-
-    expect(res.status).toBe(200);
-    expect(updateRuleFn).toHaveBeenCalledWith({
-      id: 'rule-1',
-      conditions: [{ field: 'payee', op: 'is', value: 'payee-1' }],
-      actions: [{ field: 'notes', op: 'set', value: 'Categorized' }],
-    });
-    const parsed = JSON.parse(res.body.result.content[0].text);
-    expect(parsed.rule.id).toBe('rule-1');
-  });
-
-  it('handles delete_rule tool call', async () => {
-    const deleteRuleFn = vi.fn().mockResolvedValue({ id: 'rule-1' });
-    const gateway = createStubGateway({ deleteRule: deleteRuleFn });
-    const app = createApp({ config: testConfig, budgetGateway: gateway });
-    const token = await issueBearerToken(app);
-
-    const res = await request(app)
-      .post('/mcp')
-      .set('Host', 'mcp.example.com')
-      .set('Authorization', `Bearer ${token}`)
-      .set('Accept', 'application/json, text/event-stream')
-      .set('Content-Type', 'application/json')
-      .send({
-        jsonrpc: '2.0',
-        id: 5,
-        method: 'tools/call',
-        params: {
-          name: 'delete_rule',
-          arguments: {
-            id: 'rule-1',
-          },
-        },
-      });
-
-    expect(res.status).toBe(200);
-    expect(deleteRuleFn).toHaveBeenCalledWith('rule-1');
-    const parsed = JSON.parse(res.body.result.content[0].text);
-    expect(parsed).toEqual({ success: true, id: 'rule-1' });
   });
 });
 

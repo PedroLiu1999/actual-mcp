@@ -50,7 +50,7 @@ afterEach(() => {
 });
 
 describe('Category and Category Group MCP Tools Seam', () => {
-  it('exposes category and category group tools with correct readOnlyHint and destructiveHint annotations on tools/list', async () => {
+  it('exposes manage_categories on tools/list and omits retired shallow category and group CRUD tools', async () => {
     const gateway = createStubGateway();
     const app = createApp({ config: testConfig, budgetGateway: gateway });
     const token = await issueBearerToken(app);
@@ -71,54 +71,23 @@ describe('Category and Category Group MCP Tools Seam', () => {
     expect(listRes.status).toBe(200);
     const tools = listRes.body.result.tools;
 
-    const createCat = tools.find((t: { name: string }) => t.name === 'create_category');
-    expect(createCat).toBeDefined();
-    expect(createCat.annotations).toMatchObject({
-      readOnlyHint: false,
-      destructiveHint: false,
-    });
-
-    const updateCat = tools.find((t: { name: string }) => t.name === 'update_category');
-    expect(updateCat).toBeDefined();
-    expect(updateCat.annotations).toMatchObject({
-      readOnlyHint: false,
-      destructiveHint: false,
-    });
-
-    const deleteCat = tools.find((t: { name: string }) => t.name === 'delete_category');
-    expect(deleteCat).toBeDefined();
-    expect(deleteCat.annotations).toMatchObject({
-      readOnlyHint: false,
-      destructiveHint: true,
-    });
-
-    const createGroup = tools.find((t: { name: string }) => t.name === 'create_category_group');
-    expect(createGroup).toBeDefined();
-    expect(createGroup.annotations).toMatchObject({
-      readOnlyHint: false,
-      destructiveHint: false,
-    });
-
-    const updateGroup = tools.find((t: { name: string }) => t.name === 'update_category_group');
-    expect(updateGroup).toBeDefined();
-    expect(updateGroup.annotations).toMatchObject({
-      readOnlyHint: false,
-      destructiveHint: false,
-    });
-
-    const deleteGroup = tools.find((t: { name: string }) => t.name === 'delete_category_group');
-    expect(deleteGroup).toBeDefined();
-    expect(deleteGroup.annotations).toMatchObject({
-      readOnlyHint: false,
-      destructiveHint: true,
-    });
-
     const manageCategories = tools.find((t: { name: string }) => t.name === 'manage_categories');
     expect(manageCategories).toBeDefined();
     expect(manageCategories.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: true,
     });
+
+    for (const retiredTool of [
+      'create_category',
+      'update_category',
+      'delete_category',
+      'create_category_group',
+      'update_category_group',
+      'delete_category_group',
+    ]) {
+      expect(tools.find((t: { name: string }) => t.name === retiredTool)).toBeUndefined();
+    }
   });
 
   it('invokes manage_categories via tools/call with default target "category" and returns the standardized envelope', async () => {
@@ -188,53 +157,7 @@ describe('Category and Category Group MCP Tools Seam', () => {
     });
   });
 
-  it('invokes create_category via tools/call and returns the created category ID', async () => {
-    let capturedInput: unknown;
-    const gateway = createStubGateway({
-      createCategory: async (input) => {
-        capturedInput = input;
-        return { id: 'cat-new-123' };
-      },
-    });
-
-    const app = createApp({ config: testConfig, budgetGateway: gateway });
-    const token = await issueBearerToken(app);
-
-    const callRes = await request(app)
-      .post('/mcp')
-      .set('Host', 'mcp.example.com')
-      .set('Authorization', `Bearer ${token}`)
-      .set('Accept', 'application/json, text/event-stream')
-      .set('Content-Type', 'application/json')
-      .send({
-        jsonrpc: '2.0',
-        id: 2,
-        method: 'tools/call',
-        params: {
-          name: 'create_category',
-          arguments: {
-            name: 'Daycare & Schooling',
-            groupId: 'group-kids',
-            isIncome: false,
-            hidden: false,
-          },
-        },
-      });
-
-    expect(callRes.status).toBe(200);
-    expect(callRes.body.result?.isError).toBeFalsy();
-    expect(capturedInput).toEqual({
-      name: 'Daycare & Schooling',
-      groupId: 'group-kids',
-      isIncome: false,
-      hidden: false,
-    });
-    expect(JSON.parse(callRes.body.result.content[0].text)).toEqual({
-      id: 'cat-new-123',
-    });
-  });
-
-  it('rejects create_category via tools/call when required name or groupId are missing', async () => {
+  it('rejects manage_categories via tools/call when action is not in supported enum', async () => {
     const gateway = createStubGateway();
     const app = createApp({ config: testConfig, budgetGateway: gateway });
     const token = await issueBearerToken(app);
@@ -247,240 +170,19 @@ describe('Category and Category Group MCP Tools Seam', () => {
       .set('Content-Type', 'application/json')
       .send({
         jsonrpc: '2.0',
-        id: 3,
+        id: 21,
         method: 'tools/call',
         params: {
-          name: 'create_category',
+          name: 'manage_categories',
           arguments: {
-            name: 'No Group Category',
+            action: 'invalid_action',
+            name: 'Groceries',
           },
         },
       });
 
     expect(callRes.status).toBe(200);
     expect(callRes.body.result?.isError).toBe(true);
-  });
-
-  it('invokes update_category via tools/call and updates fields', async () => {
-    let capturedInput: unknown;
-    const gateway = createStubGateway({
-      updateCategory: async (input) => {
-        capturedInput = input;
-        return { id: input.id, success: true };
-      },
-    });
-
-    const app = createApp({ config: testConfig, budgetGateway: gateway });
-    const token = await issueBearerToken(app);
-
-    const callRes = await request(app)
-      .post('/mcp')
-      .set('Host', 'mcp.example.com')
-      .set('Authorization', `Bearer ${token}`)
-      .set('Accept', 'application/json, text/event-stream')
-      .set('Content-Type', 'application/json')
-      .send({
-        jsonrpc: '2.0',
-        id: 4,
-        method: 'tools/call',
-        params: {
-          name: 'update_category',
-          arguments: {
-            id: 'cat-123',
-            name: 'Education & Tuition',
-            groupId: 'group-reorganized',
-            hidden: true,
-          },
-        },
-      });
-
-    expect(callRes.status).toBe(200);
-    expect(callRes.body.result?.isError).toBeFalsy();
-    expect(capturedInput).toEqual({
-      id: 'cat-123',
-      name: 'Education & Tuition',
-      groupId: 'group-reorganized',
-      hidden: true,
-    });
-    expect(JSON.parse(callRes.body.result.content[0].text)).toMatchObject({
-      id: 'cat-123',
-      success: true,
-    });
-  });
-
-  it('invokes delete_category via tools/call with optional transferCategoryId', async () => {
-    let capturedInput: unknown;
-    const gateway = createStubGateway({
-      deleteCategory: async (input) => {
-        capturedInput = input;
-        return { id: input.id, success: true };
-      },
-    });
-
-    const app = createApp({ config: testConfig, budgetGateway: gateway });
-    const token = await issueBearerToken(app);
-
-    const callRes = await request(app)
-      .post('/mcp')
-      .set('Host', 'mcp.example.com')
-      .set('Authorization', `Bearer ${token}`)
-      .set('Accept', 'application/json, text/event-stream')
-      .set('Content-Type', 'application/json')
-      .send({
-        jsonrpc: '2.0',
-        id: 5,
-        method: 'tools/call',
-        params: {
-          name: 'delete_category',
-          arguments: {
-            id: 'cat-old',
-            transferCategoryId: 'cat-dest',
-          },
-        },
-      });
-
-    expect(callRes.status).toBe(200);
-    expect(callRes.body.result?.isError).toBeFalsy();
-    expect(capturedInput).toEqual({
-      id: 'cat-old',
-      transferCategoryId: 'cat-dest',
-    });
-    expect(JSON.parse(callRes.body.result.content[0].text)).toMatchObject({
-      id: 'cat-old',
-      success: true,
-    });
-  });
-
-  it('invokes create_category_group via tools/call and returns the created group ID', async () => {
-    let capturedInput: unknown;
-    const gateway = createStubGateway({
-      createCategoryGroup: async (input) => {
-        capturedInput = input;
-        return { id: 'group-new-456' };
-      },
-    });
-
-    const app = createApp({ config: testConfig, budgetGateway: gateway });
-    const token = await issueBearerToken(app);
-
-    const callRes = await request(app)
-      .post('/mcp')
-      .set('Host', 'mcp.example.com')
-      .set('Authorization', `Bearer ${token}`)
-      .set('Accept', 'application/json, text/event-stream')
-      .set('Content-Type', 'application/json')
-      .send({
-        jsonrpc: '2.0',
-        id: 6,
-        method: 'tools/call',
-        params: {
-          name: 'create_category_group',
-          arguments: {
-            name: 'Savings Goals',
-            isIncome: false,
-            hidden: false,
-          },
-        },
-      });
-
-    expect(callRes.status).toBe(200);
-    expect(callRes.body.result?.isError).toBeFalsy();
-    expect(capturedInput).toEqual({
-      name: 'Savings Goals',
-      isIncome: false,
-      hidden: false,
-    });
-    expect(JSON.parse(callRes.body.result.content[0].text)).toEqual({
-      id: 'group-new-456',
-    });
-  });
-
-  it('invokes update_category_group via tools/call and updates fields', async () => {
-    let capturedInput: unknown;
-    const gateway = createStubGateway({
-      updateCategoryGroup: async (input) => {
-        capturedInput = input;
-        return { id: input.id, success: true };
-      },
-    });
-
-    const app = createApp({ config: testConfig, budgetGateway: gateway });
-    const token = await issueBearerToken(app);
-
-    const callRes = await request(app)
-      .post('/mcp')
-      .set('Host', 'mcp.example.com')
-      .set('Authorization', `Bearer ${token}`)
-      .set('Accept', 'application/json, text/event-stream')
-      .set('Content-Type', 'application/json')
-      .send({
-        jsonrpc: '2.0',
-        id: 7,
-        method: 'tools/call',
-        params: {
-          name: 'update_category_group',
-          arguments: {
-            id: 'group-456',
-            name: 'Long-term Savings',
-            hidden: true,
-          },
-        },
-      });
-
-    expect(callRes.status).toBe(200);
-    expect(callRes.body.result?.isError).toBeFalsy();
-    expect(capturedInput).toEqual({
-      id: 'group-456',
-      name: 'Long-term Savings',
-      hidden: true,
-    });
-    expect(JSON.parse(callRes.body.result.content[0].text)).toMatchObject({
-      id: 'group-456',
-      success: true,
-    });
-  });
-
-  it('invokes delete_category_group via tools/call with optional transferCategoryId', async () => {
-    let capturedInput: unknown;
-    const gateway = createStubGateway({
-      deleteCategoryGroup: async (input) => {
-        capturedInput = input;
-        return { id: input.id, success: true };
-      },
-    });
-
-    const app = createApp({ config: testConfig, budgetGateway: gateway });
-    const token = await issueBearerToken(app);
-
-    const callRes = await request(app)
-      .post('/mcp')
-      .set('Host', 'mcp.example.com')
-      .set('Authorization', `Bearer ${token}`)
-      .set('Accept', 'application/json, text/event-stream')
-      .set('Content-Type', 'application/json')
-      .send({
-        jsonrpc: '2.0',
-        id: 8,
-        method: 'tools/call',
-        params: {
-          name: 'delete_category_group',
-          arguments: {
-            id: 'group-obsolete',
-            transferCategoryId: 'cat-general',
-          },
-        },
-      });
-
-    expect(callRes.status).toBe(200);
-    expect(callRes.body.result?.isError).toBeFalsy();
-    expect(capturedInput).toEqual({
-      id: 'group-obsolete',
-      transferCategoryId: 'cat-general',
-    });
-    expect(JSON.parse(callRes.body.result.content[0].text)).toMatchObject({
-      id: 'group-obsolete',
-      success: true,
-    });
   });
 });
 

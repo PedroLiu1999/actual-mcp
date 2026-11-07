@@ -29,12 +29,12 @@ Designed for single-user VPS deployments running `actual-server` and `cloudflare
 
 ## MCP tools reference
 
-`actual-mcp` provides all 39 MCP tools: 11 read tools and 28 write tools across categories, category groups, payees, accounts, bank synchronization, budget adjustments, recurring schedules, and automation rules. Every tool returns structured JSON in MCP text content blocks and includes safety annotations (`readOnlyHint`, `destructiveHint`).
+`actual-mcp` provides all 20 MCP tools: 10 read tools, 5 consolidated deep Resource Facades (with in-process human-readable name resolution and standardized result envelopes), and 5 budget and bank synchronization write tools. Every tool returns structured JSON in MCP text content blocks and includes safety annotations (`readOnlyHint`, `destructiveHint`).
 
 ### Read tools (`readOnlyHint: true`, `destructiveHint: false`)
 
 <details>
-<summary><strong>View read tools (11 tools)</strong></summary>
+<summary><strong>View read tools (10 tools)</strong></summary>
 
 | Tool | Description | Parameters |
 | :--- | :--- | :--- |
@@ -47,102 +47,37 @@ Designed for single-user VPS deployments running `actual-server` and `cloudflare
 | `list_budget_months` | List available `YYYY-MM` budget months in the target budget. | `forceSync?` (`boolean`) |
 | `get_budget_month` | Inspect a `YYYY-MM` budget month summary (`toBudget`, `totalIncome`, `totalBudgeted`, `totalSpent`, `totalBalance`, and per-category amounts in decimal units). | `month` (`YYYY-MM`, required), `forceSync?` (`boolean`) |
 | `list_schedules` | List all recurring schedules in the target budget with ID, name, rule ID, next date, completed flag, transaction posting flag, payee ID, account ID, decimal amount, amount operator, and recurrence configuration. | `forceSync?` (`boolean`) |
-| `get_schedule_upcoming_dates` | Calculate upcoming occurrence dates for a schedule ID or date recurrence configuration over a date range or count. | `scheduleId?` (`string`), `date?` (`string \| object`), `start?` (`YYYY-MM-DD`), `end?` (`YYYY-MM-DD`), `count?` (`number`, 1..100, default 10), `forceSync?` (`boolean`) |
 | `list_rules` | List all automation rules in the target budget with conditions, actions, stage, and operator, with optional payee filtering. Amounts in conditions and actions are converted to decimal amounts. | `payeeId?` (`string`), `forceSync?` (`boolean`) |
 
 </details>
 
-### Write tools (`readOnlyHint: false`)
+### Deep Resource Facades (`readOnlyHint: false`, `destructiveHint: true`)
 
 <details>
-<summary><strong>Transactions and budget amounts (4 tools)</strong></summary>
+<summary><strong>Consolidated entity lifecycle facades (5 tools)</strong></summary>
 
 | Tool | Destructive | Description | Parameters |
 | :--- | :---: | :--- | :--- |
-| `create_transactions` | `false` | Create a batch of 1 to 50 transactions in an account using decimal amounts. Uses `importTransactions` by default (`runRules: true`) so payee matching and categorization rules run automatically, or `addTransactions` when `runRules: false`. | `accountId` (`string`, required), `transactions` (`Array<{ date, amount, payeeName?, payeeId?, categoryId?, notes?, cleared?, importedId? }>`, 1–50 items), `runRules?` (`boolean`, default `true`) |
-| `update_transaction` | `false` | Update an existing transaction by ID and return `{ previous, updated }` in decimal amounts so changes can be verified or reverted. | `id` (`string`, required), `date?` (`YYYY-MM-DD`), `amount?` (`number`), `payeeId?` (`string \| null`), `categoryId?` (`string \| null`), `notes?` (`string \| null`), `cleared?` (`boolean`) |
-| `delete_transaction` | `true` | Delete a transaction by ID and return `{ deleted }` with the full pre-deletion record in decimal amounts so it can be restored if deleted by mistake. | `id` (`string`, required) |
+| `manage_transactions` | `true` | Consolidated Resource Facade for transaction lifecycle (`action: 'create' \| 'update' \| 'delete'`). Supports batch creation (1–50 items with decimal amounts, in-process account/category/payee name resolution, and `runRules` default `true`), single or bulk updates across 1–50 transaction IDs with automatic payee creation, and single or bulk deletions. | `action` (`'create' \| 'update' \| 'delete'`, required), `account?` / `accountId?` (`string`), `transactions?` (`Array<{ date, amount, payee?, payeeName?, payeeId?, category?, categoryId?, notes?, cleared?, importedId? }>`, 1–50 items), `runRules?` (`boolean`, default `true`), `id?` (`string`), `ids?` (`string[]`, 1–50 items), `date?` (`YYYY-MM-DD`), `amount?` (`number`), `payee?` / `payeeId?` / `payeeName?` (`string \| null`), `category?` / `categoryId?` (`string \| null`), `notes?` (`string \| null`), `cleared?` (`boolean`) |
+| `manage_categories` | `true` | Consolidated Resource Facade for category and category group lifecycle (`action: 'create' \| 'update' \| 'delete' \| 'move'`, `target: 'category' \| 'group'`). Resolves names or UUIDs in-process, automatically creates missing category groups on category create/move, and enforces `transferTo` when deleting non-empty categories or groups. | `action` (`'create' \| 'update' \| 'delete' \| 'move'`, required), `target?` (`'category' \| 'group'`, default `'category'`), `id?` (`string`), `name?` (`string`), `newName?` (`string`), `group?` / `groupId?` (`string`), `isIncome?` (`boolean`), `hidden?` (`boolean`), `transferTo?` / `transferCategoryId?` (`string`) |
+| `manage_payees` | `true` | Consolidated Resource Facade for payee lifecycle (`action: 'create' \| 'update' \| 'delete' \| 'merge'`). Accepts human-readable payee names or UUIDs and merges duplicate payees in a single call. | `action` (`'create' \| 'update' \| 'delete' \| 'merge'`, required), `id?` / `name?` / `payee?` (`string`), `newName?` (`string`), `target?` / `targetId?` / `targetPayeeId?` (`string`), `merge?` / `mergeIds?` / `sourcePayeeIds?` (`string[]`, min 1) |
+| `manage_accounts` | `true` | Consolidated Resource Facade for account lifecycle (`action: 'create' \| 'update' \| 'close' \| 'reopen'`). Accepts human-readable names or UUIDs for accounts and transfer categories, and enforces safe balance transfer on closure. | `action` (`'create' \| 'update' \| 'close' \| 'reopen'`, required), `id?` / `name?` / `account?` (`string`), `newName?` (`string`), `type?` (`'checking' \| 'savings' \| 'credit' \| 'investment' \| 'mortgage' \| 'debt' \| 'other'`), `offbudget?` (`boolean`), `initialBalance?` (`number`), `transferTo?` / `transferAccountId?` (`string`), `transferCategory?` / `transferCategoryId?` (`string`), `forced?` (`boolean`) |
+| `manage_automations` | `true` | Consolidated Resource Facade for recurring schedules and automation rules (`target: 'schedule' \| 'rule'`, `action: 'create' \| 'update' \| 'delete' \| 'preview_dates'`). Resolves account, payee, category, and schedule names in-process and converts decimal amounts automatically. | `target` (`'schedule' \| 'rule'`, required), `action` (`'create' \| 'update' \| 'delete' \| 'preview_dates'`, required), `id?` / `scheduleId?` / `name?` (`string`), `account?` / `accountId?` (`string`), `payee?` / `payeeId?` (`string \| null`), `amount?` (`number \| { num1, num2 }`), `amountOp?` (`'is' \| 'isapprox' \| 'isbetween'`), `date?` (`string \| object`), `postsTransaction?` / `posts_transaction?` (`boolean`), `resetNextDate?` (`boolean`), `start?` / `end?` (`YYYY-MM-DD`), `count?` (`1..100`), `forceSync?` (`boolean`), `stage?` (`'pre' \| 'post' \| 'default' \| null`), `conditionsOp?` (`'and' \| 'or'`), `conditions?` (`Array`), `actions?` (`Array`) |
+
+</details>
+
+### Budget & bank sync write tools (`readOnlyHint: false`, `destructiveHint: false`)
+
+<details>
+<summary><strong>Budget envelope & bank synchronization tools (5 tools)</strong></summary>
+
+| Tool | Destructive | Description | Parameters |
+| :--- | :---: | :--- | :--- |
 | `set_budget_amount` | `false` | Update a category budgeted decimal amount or overspending carryover flag in a `YYYY-MM` budget month, returning `{ previous, updated }` states. | `month` (`YYYY-MM`, required), `categoryId` (`string`, required), `budgeted?` (`number`), `carryover?` (`boolean`) |
-
-</details>
-
-<details>
-<summary><strong>Categories and category groups (6 tools)</strong></summary>
-
-| Tool | Destructive | Description | Parameters |
-| :--- | :---: | :--- | :--- |
-| `create_category` | `false` | Create an envelope category under a category group. Returns `{ id }`. | `name` (`string`, min 1, required), `groupId` (`string`, min 1, required), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
-| `update_category` | `false` | Update an envelope category name, parent group, or income and hidden flags. | `id` (`string`, min 1, required), `name?` (`string`), `groupId?` (`string`), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
-| `delete_category` | `true` | Delete an envelope category. When the category contains existing transactions, provide `transferCategoryId` to reassign them safely. | `id` (`string`, min 1, required), `transferCategoryId?` (`string`, min 1) |
-| `create_category_group` | `false` | Create a category group for organizing expense or income envelopes. Returns `{ id }`. | `name` (`string`, min 1, required), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
-| `update_category_group` | `false` | Update a category group name or income and hidden flags. | `id` (`string`, min 1, required), `name?` (`string`), `isIncome?` (`boolean`), `hidden?` (`boolean`) |
-| `delete_category_group` | `true` | Delete a category group. When member categories contain transactions, provide `transferCategoryId` to reassign them safely. | `id` (`string`, min 1, required), `transferCategoryId?` (`string`, min 1) |
-
-</details>
-
-<details>
-<summary><strong>Payees and merging (4 tools)</strong></summary>
-
-| Tool | Destructive | Description | Parameters |
-| :--- | :---: | :--- | :--- |
-| `create_payee` | `false` | Create a payee record by name. Returns `{ id }`. | `name` (`string`, min 1, required) |
-| `update_payee` | `false` | Rename an existing payee record. | `id` (`string`, min 1, required), `name` (`string`, min 1, required) |
-| `delete_payee` | `true` | Delete a payee record by ID. | `id` (`string`, min 1, required) |
-| `merge_payees` | `true` | Merge duplicate source payees into a target payee, reassigning all transactions and rules to the target payee and removing the source payees. | `targetPayeeId` (`string`, min 1, required), `sourcePayeeIds` (`string[]`, min 1 items, required) |
-
-</details>
-
-<details>
-<summary><strong>Account lifecycle (4 tools)</strong></summary>
-
-| Tool | Destructive | Description | Parameters |
-| :--- | :---: | :--- | :--- |
-| `create_account` | `false` | Create an on-budget or off-budget account with a specified type and optional initial balance. Returns `{ id }`. | `name` (`string`, min 1, required), `type` (`'checking' \| 'savings' \| 'credit' \| 'investment' \| 'mortgage' \| 'debt' \| 'other'`, required), `offbudget?` (`boolean`), `initialBalance?` (`number`, finite decimal amount) |
-| `update_account` | `false` | Update an account name or toggle its off-budget status. | `id` (`string`, min 1, required), `name?` (`string`), `offbudget?` (`boolean`) |
-| `close_account` | `true` | Close an account in the target budget, with optional balance and category transfer to another account. | `id` (`string`, min 1, required), `transferAccountId?` (`string`), `transferCategoryId?` (`string`) |
-| `reopen_account` | `false` | Reopen a previously closed account. | `id` (`string`, min 1, required) |
-
-</details>
-
-<details>
-<summary><strong>Bank synchronization (1 tool)</strong></summary>
-
-| Tool | Destructive | Description | Parameters |
-| :--- | :---: | :--- | :--- |
 | `run_bank_sync` | `false` | Trigger bank synchronization for a single account or for all linked accounts when `accountId` is omitted. Returns `{ updatedAccountIds, newTransactionsCount, matchedTransactionsCount, errors }`. | `accountId?` (`string`, min 1) |
-
-</details>
-
-<details>
-<summary><strong>Budget flow adjustments (3 tools)</strong></summary>
-
-| Tool | Destructive | Description | Parameters |
-| :--- | :---: | :--- | :--- |
 | `set_budget_carryover` | `false` | Set the overspending carryover flag for a category envelope in a budget month (`YYYY-MM`). When true, overspent category balance rolls into the next month. | `month` (`YYYY-MM`, required), `categoryId` (`string`, min 1, required), `carryover` (`boolean`, required) |
 | `hold_budget_for_next_month` | `false` | Hold a decimal amount from the current month available budget for the next month. | `month` (`YYYY-MM`, required), `amount` (`number`, finite decimal amount, required) |
 | `reset_budget_hold` | `false` | Reset the budget hold for a month and return held funds to the available budget. | `month` (`YYYY-MM`, required) |
-
-</details>
-
-<details>
-<summary><strong>Recurring schedules (3 tools)</strong></summary>
-
-| Tool | Destructive | Description | Parameters |
-| :--- | :---: | :--- | :--- |
-| `create_schedule` | `false` | Create a recurring schedule in the target budget with decimal amounts, recurrence rules, and a linked payee and account. | `name?` (`string`), `account` (`string`, required), `payee?` (`string`), `amount` (`number \| { num1, num2 }`, decimal amount, required), `amountOp?` (`'is' \| 'isapprox' \| 'isbetween'`), `date` (`string \| object`, required), `posts_transaction?` (`boolean`) |
-| `update_schedule` | `false` | Update fields on an existing recurring schedule (name, amount, amountOp, payee, account, date, posts_transaction, resetNextDate). | `id` (`string`, required), `name?` (`string`), `account?` (`string`), `payee?` (`string \| null`), `amount?` (`number \| { num1, num2 }`), `amountOp?` (`'is' \| 'isapprox' \| 'isbetween'`), `date?` (`string \| object`), `posts_transaction?` (`boolean`), `resetNextDate?` (`boolean`) |
-| `delete_schedule` | `true` | Delete a recurring schedule from the target budget. | `id` (`string`, required) |
-
-</details>
-
-<details>
-<summary><strong>Automation rules (3 tools)</strong></summary>
-
-| Tool | Destructive | Description | Parameters |
-| :--- | :---: | :--- | :--- |
-| `create_rule` | `false` | Create an automation rule for categorization, payee renaming, or field setting. Converts monetary condition and action values to minor units. | `stage?` (`'pre' \| 'post' \| 'default'`), `conditionsOp?` (`'and' \| 'or'`), `conditions` (`Array<{ field, op, value, options? }>`, min 1, required), `actions` (`Array<{ field?, op, value?, options? }>`, min 1, required) |
-| `update_rule` | `false` | Update conditions, actions, stage, or operator on an existing rule by ID. | `id` (`string`, required), `stage?` (`'pre' \| 'post' \| 'default'`), `conditionsOp?` (`'and' \| 'or'`), `conditions` (`Array<{ field, op, value, options? }>`, min 1, required), `actions` (`Array<{ field?, op, value?, options? }>`, min 1, required) |
-| `delete_rule` | `true` | Delete an automation rule from the target budget. | `id` (`string`, required) |
 
 </details>
 

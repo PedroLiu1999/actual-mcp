@@ -4,7 +4,7 @@
 
 **Blocked by:** 01: In-Process Identifier Resolution & Standardized Response Envelope
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Exposes a `manage_payees` tool on the MCP server with a discriminated `action` schema supporting `create`, `update`, `delete`, and `merge`.
 - [x] Resolves payee names to UUIDs in-process for single updates, deletions, and source/target merge lists.

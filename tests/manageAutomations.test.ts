@@ -129,6 +129,60 @@ describe('manage_automations MCP Tool Seam', () => {
       resolved: { 'Main Checking': '88888888-8888-4888-8888-888888888888' },
     });
   });
+
+  it('returns structured error envelope with suggestions over /mcp tools/call when EntityResolutionError is thrown', async () => {
+    const mockApi: ActualApiAdapter = {
+      getAccounts: async () => [
+        {
+          id: '88888888-8888-4888-8888-888888888888',
+          name: 'Main Checking',
+          offbudget: false,
+          closed: false,
+        },
+      ],
+      getAccountBalance: async () => 0,
+      createSchedule: vi.fn(),
+      sync: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: mockApi,
+    });
+    const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
+
+    const callRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: 'manage_automations',
+          arguments: {
+            target: 'schedule',
+            action: 'create',
+            name: 'Internet',
+            account: 'Main Checkin',
+            amount: -79.99,
+            date: { frequency: 'monthly', start: '2026-11-01' },
+          },
+        },
+      });
+
+    expect(callRes.status).toBe(200);
+    expect(callRes.body.result?.isError).toBe(true);
+    const payload = JSON.parse(callRes.body.result.content[0].text);
+    expect(payload.success).toBe(false);
+    expect(payload.entityType).toBe('account');
+    expect(payload.input).toBe('Main Checkin');
+    expect(payload.suggestions).toContain('Main Checking');
+  });
 });
 
 describe('manageAutomations ActualBudgetGateway Seam - Schedule Target', () => {
@@ -430,6 +484,19 @@ describe('manageAutomations ActualBudgetGateway Seam - Rule Target', () => {
       ...payload,
     }));
 
+    const getPayeesSpy = vi.fn(async () => [
+      {
+        id: '66666666-6666-4666-8666-666666666666',
+        name: 'Starbucks',
+        transfer_acct: null,
+      },
+      {
+        id: '77777777-7777-4777-8777-777777777777',
+        name: 'Peets Coffee',
+        transfer_acct: null,
+      },
+    ]);
+
     const mockApi: ActualApiAdapter = {
       getAccounts: async () => [
         {
@@ -440,18 +507,7 @@ describe('manageAutomations ActualBudgetGateway Seam - Rule Target', () => {
         },
       ],
       getAccountBalance: async () => 0,
-      getPayees: async () => [
-        {
-          id: '66666666-6666-4666-8666-666666666666',
-          name: 'Starbucks',
-          transfer_acct: null,
-        },
-        {
-          id: '77777777-7777-4777-8777-777777777777',
-          name: 'Peets Coffee',
-          transfer_acct: null,
-        },
-      ],
+      getPayees: getPayeesSpy,
       getCategoryGroups: async () => [
         {
           id: '11111111-1111-4111-8111-111111111111',
@@ -572,6 +628,7 @@ describe('manageAutomations ActualBudgetGateway Seam - Rule Target', () => {
         'Coffee Shops': '33333333-3333-4333-8333-333333333333',
       },
     });
+    expect(getPayeesSpy).toHaveBeenCalledTimes(1);
   });
 
   it('updates and deletes an existing rule by id and resolves linked entity names', async () => {

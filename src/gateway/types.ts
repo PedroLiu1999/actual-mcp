@@ -42,7 +42,6 @@ export interface ManageAccountsInput {
   transferAccountId?: string;
   transferCategory?: string;
   transferCategoryId?: string;
-  forced?: boolean;
 }
 
 export interface AccountSummary {
@@ -223,6 +222,8 @@ export interface ManageTransactionsUpdateInput {
   action: 'update';
   id?: string;
   ids?: string[];
+  account?: string;
+  accountId?: string;
   date?: string;
   /** Transaction amount expressed as a Decimal Amount (negative for Outflow, positive for Inflow). */
   amount?: number;

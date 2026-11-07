@@ -182,7 +182,7 @@ describe('manage_accounts Deep Resource Facade — BudgetGateway Seam', () => {
     ).rejects.toThrow(/Account "Main Checkin" not found.*Main Checking/);
   });
 
-  it('enforces safety invariants on close (requiring transferTo for non-zero balance unless forced) and resolves transferTo/transferCategory names', async () => {
+  it('enforces safety invariants on close (requiring transferTo for non-zero balance) and resolves transferTo/transferCategory names', async () => {
     const events: string[] = [];
     const balancesByAccount: Record<string, number> = {
       '88888888-8888-4888-8888-888888888888': 150050, // $1500.50
@@ -221,9 +221,9 @@ describe('manage_accounts Deep Resource Facade — BudgetGateway Seam', () => {
       sync: async () => {
         events.push('api:sync');
       },
-      closeAccount: async (id, transferAccountId, transferCategoryId, forced) => {
+      closeAccount: async (id, transferAccountId, transferCategoryId) => {
         events.push(
-          `api:closeAccount:${id}:${transferAccountId ?? 'none'}:${transferCategoryId ?? 'none'}:${forced !== undefined ? String(forced) : 'none'}`,
+          `api:closeAccount:${id}:${transferAccountId ?? 'none'}:${transferCategoryId ?? 'none'}`,
         );
       },
       reopenAccount: async (id) => {
@@ -277,7 +277,7 @@ describe('manage_accounts Deep Resource Facade — BudgetGateway Seam', () => {
     });
     expect(events).toEqual([
       'api:sync',
-      'api:closeAccount:88888888-8888-4888-8888-888888888888:99999999-9999-4999-8999-999999999999:22222222-2222-4222-8222-222222222222:none',
+      'api:closeAccount:88888888-8888-4888-8888-888888888888:99999999-9999-4999-8999-999999999999:22222222-2222-4222-8222-222222222222',
       'api:sync',
     ]);
 
@@ -301,29 +301,7 @@ describe('manage_accounts Deep Resource Facade — BudgetGateway Seam', () => {
       },
     });
 
-    // 4. Closes non-zero balance account when forced: true
-    events.length = 0;
-    const closeForced = await gateway.manageAccounts({
-      action: 'close',
-      id: '88888888-8888-4888-8888-888888888888',
-      forced: true,
-    });
-    expect(closeForced).toEqual({
-      success: true,
-      message:
-        'Closed account "88888888-8888-4888-8888-888888888888" (88888888-8888-4888-8888-888888888888)',
-      data: {
-        id: '88888888-8888-4888-8888-888888888888',
-        closed: true,
-      },
-    });
-    expect(events).toEqual([
-      'api:sync',
-      'api:closeAccount:88888888-8888-4888-8888-888888888888:none:none:true',
-      'api:sync',
-    ]);
-
-    // 5. Reopens account by name
+    // 4. Reopens account by name
     events.length = 0;
     const reopenRes = await gateway.manageAccounts({
       action: 'reopen',
@@ -384,6 +362,7 @@ describe('manage_accounts Deep Resource Facade — MCP Server Seam', () => {
       'close',
       'reopen',
     ]);
+    expect(manageAccountsTool.inputSchema?.properties?.forced).toBeUndefined();
 
     for (const retiredTool of [
       'create_account',

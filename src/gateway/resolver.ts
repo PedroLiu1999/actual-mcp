@@ -284,17 +284,33 @@ export function createResourceFacadeErrorResponse(
     return error.toEnvelope();
   }
   const message = error instanceof Error ? error.message : String(error);
+  const customEntityType =
+    error !== null &&
+    typeof error === 'object' &&
+    'entityType' in error &&
+    typeof (error as { entityType?: unknown }).entityType === 'string'
+      ? (error as { entityType: string }).entityType
+      : undefined;
+  const customInput =
+    error !== null &&
+    typeof error === 'object' &&
+    'input' in error &&
+    typeof (error as { input?: unknown }).input === 'string'
+      ? (error as { input: string }).input
+      : undefined;
   const customSuggestions =
     error !== null &&
     typeof error === 'object' &&
     'suggestions' in error &&
     Array.isArray((error as { suggestions?: unknown }).suggestions)
-      ? ((error as { suggestions: string[] }).suggestions)
+      ? (error as { suggestions: string[] }).suggestions
       : undefined;
   return {
     success: false,
     message,
     error: message,
+    ...(customEntityType !== undefined ? { entityType: customEntityType } : {}),
+    ...(customInput !== undefined ? { input: customInput } : {}),
     ...(customSuggestions !== undefined ? { suggestions: customSuggestions } : {}),
   };
 }

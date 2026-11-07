@@ -620,6 +620,67 @@ function formatRuleSummary(rawRule: ActualRuleRecord): RuleSummary {
   };
 }
 
+function createMemoizedBudgetCacheSource(
+  apiAdapter: ActualApiAdapter,
+): Omit<BudgetCacheSource, 'getAccounts' | 'getPayees' | 'getSchedules'> & {
+  getAccounts: () => Promise<ActualAccountRecord[]>;
+  getPayees: () => Promise<ActualPayeeRecord[]>;
+  getSchedules: () => Promise<ActualScheduleRecord[]>;
+  appendPayee: (payee: ActualPayeeRecord) => void;
+} {
+  let memoAccounts: ActualAccountRecord[] | null = null;
+  let memoGroups: ActualCategoryGroupRecord[] | null = null;
+  let memoCategories: ActualCategoryRecord[] | null = null;
+  let memoPayees: ActualPayeeRecord[] | null = null;
+  let memoSchedules: ActualScheduleRecord[] | null = null;
+
+  return {
+    getAccounts: async () => {
+      if (!memoAccounts) {
+        memoAccounts = (await apiAdapter.getAccounts?.()) ?? [];
+      }
+      return memoAccounts;
+    },
+    ...(apiAdapter.getCategoryGroups
+      ? {
+          getCategoryGroups: async () => {
+            if (!memoGroups) {
+              memoGroups = (await apiAdapter.getCategoryGroups?.()) ?? [];
+            }
+            return memoGroups;
+          },
+        }
+      : {}),
+    ...(apiAdapter.getCategories
+      ? {
+          getCategories: async () => {
+            if (!memoCategories) {
+              memoCategories = (await apiAdapter.getCategories?.()) ?? [];
+            }
+            return memoCategories;
+          },
+        }
+      : {}),
+    getPayees: async () => {
+      if (!memoPayees) {
+        memoPayees = (await apiAdapter.getPayees?.()) ?? [];
+      }
+      return memoPayees;
+    },
+    getSchedules: async () => {
+      if (!memoSchedules) {
+        memoSchedules = (await apiAdapter.getSchedules?.()) ?? [];
+      }
+      return memoSchedules;
+    },
+    appendPayee: (payee: ActualPayeeRecord) => {
+      if (memoPayees) {
+        memoPayees.push(payee);
+      }
+    },
+  };
+}
+
 export function createActualBudgetGateway(
   options: CreateActualBudgetGatewayOptions,
 ): ActualBudgetGateway {
@@ -1388,45 +1449,7 @@ export function createActualBudgetGateway(
 
         return executeWrite(async (apiAdapter) => {
           const resolved: Record<string, string> = {};
-          let memoAccounts: ActualAccountRecord[] | null = null;
-          let memoGroups: ActualCategoryGroupRecord[] | null = null;
-          let memoCategories: ActualCategoryRecord[] | null = null;
-          let memoPayees: ActualPayeeRecord[] | null = null;
-
-          const cacheSource: BudgetCacheSource = {
-            getAccounts: async () => {
-              if (!memoAccounts) {
-                memoAccounts = (await apiAdapter.getAccounts?.()) ?? [];
-              }
-              return memoAccounts;
-            },
-            ...(apiAdapter.getCategoryGroups
-              ? {
-                  getCategoryGroups: async () => {
-                    if (!memoGroups) {
-                      memoGroups = (await apiAdapter.getCategoryGroups?.()) ?? [];
-                    }
-                    return memoGroups;
-                  },
-                }
-              : {}),
-            ...(apiAdapter.getCategories
-              ? {
-                  getCategories: async () => {
-                    if (!memoCategories) {
-                      memoCategories = (await apiAdapter.getCategories?.()) ?? [];
-                    }
-                    return memoCategories;
-                  },
-                }
-              : {}),
-            getPayees: async () => {
-              if (!memoPayees) {
-                memoPayees = (await apiAdapter.getPayees?.()) ?? [];
-              }
-              return memoPayees;
-            },
-          };
+          const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
 
           const resolvedAccount = await resolveAccount(rawAccount, cacheSource, resolved);
           const mappedTransactions: ActualImportTransactionInput[] = [];
@@ -1553,42 +1576,21 @@ export function createActualBudgetGateway(
           }
 
           const resolved: Record<string, string> = {};
-          let memoGroups: ActualCategoryGroupRecord[] | null = null;
-          let memoCategories: ActualCategoryRecord[] | null = null;
-          let memoPayees: ActualPayeeRecord[] | null = null;
-
-          const cacheSource: BudgetCacheSource = {
-            ...(apiAdapter.getCategoryGroups
-              ? {
-                  getCategoryGroups: async () => {
-                    if (!memoGroups) {
-                      memoGroups = (await apiAdapter.getCategoryGroups?.()) ?? [];
-                    }
-                    return memoGroups;
-                  },
-                }
-              : {}),
-            ...(apiAdapter.getCategories
-              ? {
-                  getCategories: async () => {
-                    if (!memoCategories) {
-                      memoCategories = (await apiAdapter.getCategories?.()) ?? [];
-                    }
-                    return memoCategories;
-                  },
-                }
-              : {}),
-            getPayees: async () => {
-              if (!memoPayees) {
-                memoPayees = (await apiAdapter.getPayees?.()) ?? [];
-              }
-              return memoPayees;
-            },
-          };
+          const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
 
           const fields: Record<string, unknown> = {};
+          let resolvedAccountId: string | undefined;
+          let resolvedAccountName: string | undefined;
           let resolvedPayeeId: string | null | undefined;
           let resolvedCategoryId: string | null | undefined;
+
+          const rawAccount = input.account ?? input.accountId;
+          if (rawAccount !== undefined && rawAccount.trim().length > 0) {
+            const resolvedAcct = await resolveAccount(rawAccount, cacheSource, resolved);
+            resolvedAccountId = resolvedAcct.id;
+            resolvedAccountName = resolvedAcct.name;
+            fields.account = resolvedAcct.id;
+          }
 
           if (input.date !== undefined) {
             fields.date = input.date;
@@ -1629,10 +1631,7 @@ export function createActualBudgetGateway(
                     name: rawPayee.trim(),
                   });
                   resolved[rawPayee] = createdPayeeId;
-                  const currentPayees = memoPayees as ActualPayeeRecord[] | null;
-                  if (currentPayees) {
-                    currentPayees.push({ id: createdPayeeId, name: rawPayee.trim() });
-                  }
+                  cacheSource.appendPayee({ id: createdPayeeId, name: rawPayee.trim() });
                   resolvedPayeeId = createdPayeeId;
                   fields.payee = createdPayeeId;
                 } else {
@@ -1678,6 +1677,15 @@ export function createActualBudgetGateway(
             return (
               findTransactionById(afterRecords, targetId) ?? {
                 ...previous,
+                ...(resolvedAccountId !== undefined
+                  ? {
+                      account: resolvedAccountId,
+                      accountId: resolvedAccountId,
+                      ...(resolvedAccountName !== undefined
+                        ? { accountName: resolvedAccountName }
+                        : {}),
+                    }
+                  : {}),
                 ...(input.date !== undefined ? { date: input.date } : {}),
                 ...(input.amount !== undefined ? { amount: input.amount } : {}),
                 ...(resolvedPayeeId !== undefined
@@ -1895,6 +1903,7 @@ export function createActualBudgetGateway(
 
       return executeWrite(async (apiAdapter) => {
         const resolved: Record<string, string> = {};
+        const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
 
         if (input.action === 'create') {
           const name = input.name?.trim();
@@ -1940,7 +1949,7 @@ export function createActualBudgetGateway(
           try {
             const matchedGroup = await resolveCategoryGroup(
               groupRef,
-              apiAdapter,
+              cacheSource,
               resolved,
             );
             groupId = matchedGroup.id;
@@ -2010,7 +2019,7 @@ export function createActualBudgetGateway(
             }
             const targetGroup = await resolveCategoryGroup(
               targetRef,
-              apiAdapter,
+              cacheSource,
               resolved,
             );
             const fields: Record<string, unknown> = {};
@@ -2040,7 +2049,7 @@ export function createActualBudgetGateway(
           }
           const targetCat = await resolveCategory(
             targetRef,
-            apiAdapter,
+            cacheSource,
             resolved,
           );
           const groupRef = input.group ?? input.groupId;
@@ -2048,7 +2057,7 @@ export function createActualBudgetGateway(
           if (groupRef !== undefined && groupRef.trim() !== '') {
             const matchedGroup = await resolveCategoryGroup(
               groupRef,
-              apiAdapter,
+              cacheSource,
               resolved,
             );
             resolvedGroupId = matchedGroup.id;
@@ -2102,7 +2111,7 @@ export function createActualBudgetGateway(
 
           const targetCat = await resolveCategory(
             targetRef,
-            apiAdapter,
+            cacheSource,
             resolved,
           );
 
@@ -2113,7 +2122,7 @@ export function createActualBudgetGateway(
           try {
             const matchedGroup = await resolveCategoryGroup(
               groupRef,
-              apiAdapter,
+              cacheSource,
               resolved,
             );
             groupId = matchedGroup.id;
@@ -2162,13 +2171,13 @@ export function createActualBudgetGateway(
           }
           const transferRef = input.transferTo ?? input.transferCategoryId;
 
-          const rawGroups = (await apiAdapter.getCategoryGroups?.()) ?? [];
+          const rawGroups = (await cacheSource.getCategoryGroups?.()) ?? [];
           const needsFallbackCats = rawGroups.some(
             (g) => !Array.isArray(g.categories),
           );
           const fallbackCats =
-            needsFallbackCats && apiAdapter.getCategories
-              ? await apiAdapter.getCategories()
+            needsFallbackCats && cacheSource.getCategories
+              ? await cacheSource.getCategories()
               : [];
           const allCategories =
             rawGroups.length > 0
@@ -2177,8 +2186,8 @@ export function createActualBudgetGateway(
                     ? g.categories
                     : fallbackCats.filter((c) => c.group_id === g.id),
                 )
-              : apiAdapter.getCategories
-                ? await apiAdapter.getCategories()
+              : cacheSource.getCategories
+                ? await cacheSource.getCategories()
                 : [];
 
           const countTransactionsForCategories = async (
@@ -2231,7 +2240,7 @@ export function createActualBudgetGateway(
             }
             const targetGroup = await resolveCategoryGroup(
               targetRef,
-              apiAdapter,
+              cacheSource,
               resolved,
             );
             const groupRecord = rawGroups.find((g) => g.id === targetGroup.id);
@@ -2247,7 +2256,7 @@ export function createActualBudgetGateway(
             if (transferRef !== undefined && transferRef.trim() !== '') {
               const transferCat = await resolveCategory(
                 transferRef,
-                apiAdapter,
+                cacheSource,
                 resolved,
               );
               if (memberCategoryIds.has(transferCat.id)) {
@@ -2318,7 +2327,7 @@ export function createActualBudgetGateway(
           }
           const targetCat = await resolveCategory(
             targetRef,
-            apiAdapter,
+            cacheSource,
             resolved,
           );
           const categoryRecord = allCategories.find(
@@ -2332,7 +2341,7 @@ export function createActualBudgetGateway(
           if (transferRef !== undefined && transferRef.trim() !== '') {
             const transferCat = await resolveCategory(
               transferRef,
-              apiAdapter,
+              cacheSource,
               resolved,
             );
             if (transferCat.id === targetCat.id) {
@@ -2473,21 +2482,7 @@ export function createActualBudgetGateway(
     async managePayees(input: ManagePayeesInput): Promise<ResourceFacadeResult<unknown>> {
       return executeWrite(async (apiAdapter) => {
         const resolved: Record<string, string> = {};
-        let payeesSnapshot: PayeeSummary[] | null = null;
-
-        const cacheSource: BudgetCacheSource = {
-          listPayees: async () => {
-            if (payeesSnapshot === null) {
-              const rawPayees = (await apiAdapter.getPayees?.()) ?? [];
-              payeesSnapshot = rawPayees.map((payee) => ({
-                id: payee.id,
-                name: payee.name,
-                transfer_acct: payee.transfer_acct ?? null,
-              }));
-            }
-            return payeesSnapshot;
-          },
-        };
+        const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
 
         switch (input.action) {
           case 'create': {
@@ -2682,41 +2677,7 @@ export function createActualBudgetGateway(
     async manageAccounts(input: ManageAccountsInput): Promise<ResourceFacadeResult<unknown>> {
       return executeWrite(async (apiAdapter) => {
         const resolved: Record<string, string> = {};
-        let memoizedAccounts: ActualAccountRecord[] | null = null;
-        let memoizedCategoryGroups: ActualCategoryGroupRecord[] | null = null;
-        let memoizedCategories: ActualCategoryRecord[] | null = null;
-
-        const getRawAccounts = async (): Promise<ActualAccountRecord[]> => {
-          if (memoizedAccounts === null) {
-            memoizedAccounts = (await apiAdapter.getAccounts?.()) ?? [];
-          }
-          return memoizedAccounts;
-        };
-
-        const cacheSource: BudgetCacheSource = {
-          getAccounts: getRawAccounts,
-          ...(apiAdapter.getCategoryGroups
-            ? {
-                getCategoryGroups: async () => {
-                  if (memoizedCategoryGroups === null) {
-                    memoizedCategoryGroups =
-                      (await apiAdapter.getCategoryGroups?.()) ?? [];
-                  }
-                  return memoizedCategoryGroups;
-                },
-              }
-            : {}),
-          ...(apiAdapter.getCategories
-            ? {
-                getCategories: async () => {
-                  if (memoizedCategories === null) {
-                    memoizedCategories = (await apiAdapter.getCategories?.()) ?? [];
-                  }
-                  return memoizedCategories;
-                },
-              }
-            : {}),
-        };
+        const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
 
         if (input.action === 'create') {
           if (!apiAdapter.createAccount) {
@@ -2831,13 +2792,13 @@ export function createActualBudgetGateway(
               ? await resolveCategory(rawTransferCategory, cacheSource, resolved)
               : undefined;
 
-          if (!resolvedTransferTo && !input.forced) {
+          if (!resolvedTransferTo) {
             const minorBalance = await apiAdapter.getAccountBalance(
               resolvedTarget.id,
             );
             if (minorBalance !== 0) {
               const decimalBalance = minorToDecimalAmount(minorBalance);
-              const rawAccounts = await getRawAccounts();
+              const rawAccounts = await cacheSource.getAccounts();
               const availableAccounts = rawAccounts
                 .filter((a) => a.id !== resolvedTarget.id && !a.closed)
                 .map((a) => a.name);
@@ -2856,20 +2817,11 @@ export function createActualBudgetGateway(
             }
           }
 
-          if (input.forced !== undefined) {
-            await apiAdapter.closeAccount(
-              resolvedTarget.id,
-              resolvedTransferTo?.id,
-              resolvedTransferCategory?.id,
-              input.forced,
-            );
-          } else {
-            await apiAdapter.closeAccount(
-              resolvedTarget.id,
-              resolvedTransferTo?.id,
-              resolvedTransferCategory?.id,
-            );
-          }
+          await apiAdapter.closeAccount(
+            resolvedTarget.id,
+            resolvedTransferTo?.id,
+            resolvedTransferCategory?.id,
+          );
 
           const targetLabel = resolvedTarget.name ?? resolvedTarget.id;
           const transferSuffix = resolvedTransferTo
@@ -3143,12 +3095,13 @@ export function createActualBudgetGateway(
             if (!apiAdapter.createSchedule) {
               throw new Error('createSchedule is not supported by the current API adapter');
             }
-            const resolvedAcct = await resolveAccount(rawAccount, apiAdapter, resolved);
+            const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+            const resolvedAcct = await resolveAccount(rawAccount, cacheSource, resolved);
             const rawPayee =
               input.payee !== undefined ? input.payee : input.payeeId;
             let resolvedPayeeId: string | null = null;
             if (typeof rawPayee === 'string' && rawPayee.trim().length > 0) {
-              const resolvedPayee = await resolvePayee(rawPayee, apiAdapter, resolved);
+              const resolvedPayee = await resolvePayee(rawPayee, cacheSource, resolved);
               resolvedPayeeId = resolvedPayee.id;
             }
 
@@ -3194,7 +3147,8 @@ export function createActualBudgetGateway(
             if (!apiAdapter.updateSchedule) {
               throw new Error('updateSchedule is not supported by the current API adapter');
             }
-            const resolvedSched = await resolveSchedule(scheduleRef, apiAdapter, resolved);
+            const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+            const resolvedSched = await resolveSchedule(scheduleRef, cacheSource, resolved);
             const scheduleId = resolvedSched.id;
 
             const internalFields: Record<string, unknown> = {};
@@ -3207,7 +3161,7 @@ export function createActualBudgetGateway(
 
             const rawAccount = input.account ?? input.accountId;
             if (rawAccount !== undefined) {
-              const resolvedAcct = await resolveAccount(rawAccount, apiAdapter, resolved);
+              const resolvedAcct = await resolveAccount(rawAccount, cacheSource, resolved);
               internalFields.account = resolvedAcct.id;
               externalFields.account = resolvedAcct.id;
             }
@@ -3219,7 +3173,7 @@ export function createActualBudgetGateway(
                 internalFields.payee = null;
                 externalFields.payee = null;
               } else {
-                const resolvedPayee = await resolvePayee(rawPayee, apiAdapter, resolved);
+                const resolvedPayee = await resolvePayee(rawPayee, cacheSource, resolved);
                 internalFields.payee = resolvedPayee.id;
                 externalFields.payee = resolvedPayee.id;
               }
@@ -3272,7 +3226,8 @@ export function createActualBudgetGateway(
             if (!apiAdapter.deleteSchedule) {
               throw new Error('deleteSchedule is not supported by the current API adapter');
             }
-            const resolvedSched = await resolveSchedule(scheduleRef, apiAdapter, resolved);
+            const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+            const resolvedSched = await resolveSchedule(scheduleRef, cacheSource, resolved);
             await apiAdapter.deleteSchedule(resolvedSched.id);
 
             return createResourceFacadeResponse({
@@ -3292,6 +3247,7 @@ export function createActualBudgetGateway(
                 );
               }
 
+              const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
               let dateConfig = input.date;
               let resolvedScheduleId: string | undefined;
               const scheduleRef = input.id ?? input.scheduleId ?? input.name;
@@ -3299,7 +3255,7 @@ export function createActualBudgetGateway(
               if (scheduleRef) {
                 const resolvedSched = await resolveSchedule(
                   scheduleRef,
-                  apiAdapter,
+                  cacheSource,
                   resolved,
                 );
                 resolvedScheduleId = resolvedSched.id;
@@ -3309,7 +3265,7 @@ export function createActualBudgetGateway(
                       'getSchedules is not supported by the current API adapter',
                     );
                   }
-                  const rawSchedules = await apiAdapter.getSchedules();
+                  const rawSchedules = await cacheSource.getSchedules();
                   const sched = (rawSchedules ?? []).find(
                     (s) => s.id === resolvedScheduleId,
                   );
@@ -3367,14 +3323,15 @@ export function createActualBudgetGateway(
             if (!apiAdapter.createRule) {
               throw new Error('createRule is not supported by the current API adapter');
             }
+            const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
             const resolvedConditions = await resolveRuleConditionsEntities(
               input.conditions!,
-              apiAdapter,
+              cacheSource,
               resolved,
             );
             const resolvedActions = await resolveRuleActionsEntities(
               input.actions!,
-              apiAdapter,
+              cacheSource,
               resolved,
             );
 
@@ -3410,14 +3367,15 @@ export function createActualBudgetGateway(
             if (!apiAdapter.updateRule) {
               throw new Error('updateRule is not supported by the current API adapter');
             }
+            const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
             const resolvedConditions = await resolveRuleConditionsEntities(
               input.conditions!,
-              apiAdapter,
+              cacheSource,
               resolved,
             );
             const resolvedActions = await resolveRuleActionsEntities(
               input.actions!,
-              apiAdapter,
+              cacheSource,
               resolved,
             );
 

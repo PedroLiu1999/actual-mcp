@@ -6,10 +6,7 @@ import {
   structuredAqlQueryInputSchema,
   structuredAqlQueryObjectSchema,
 } from '../gateway/aql.js';
-import {
-  createResourceFacadeErrorResponse,
-  EntityResolutionError,
-} from '../gateway/resolver.js';
+import { createResourceFacadeErrorResponse } from '../gateway/resolver.js';
 import type { BudgetGateway, ManageTransactionsInput } from '../gateway/types.js';
 
 const isoDateSchema = z
@@ -24,6 +21,35 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
   return Object.fromEntries(
     Object.entries(obj).filter(([, value]) => value !== undefined),
   ) as T;
+}
+
+async function executeResourceFacadeTool(
+  operation: () => Promise<unknown>,
+): Promise<{
+  isError?: boolean;
+  content: Array<{ type: 'text'; text: string }>;
+}> {
+  try {
+    const result = await operation();
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      isError: true,
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(createResourceFacadeErrorResponse(error), null, 2),
+        },
+      ],
+    };
+  }
 }
 
 const scheduleAmountSchema = z.union([
@@ -516,12 +542,12 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           .string()
           .min(1)
           .optional()
-          .describe('Target account name or UUID (for action: "create").'),
+          .describe('Target account name or UUID (for action: "create" or "update").'),
         accountId: z
           .string()
           .min(1)
           .optional()
-          .describe('Target account UUID or name (for action: "create").'),
+          .describe('Target account UUID or name (for action: "create" or "update").'),
         transactions: z
           .array(manageTransactionItemSchema)
           .min(1, 'At least 1 transaction is required')
@@ -627,6 +653,8 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           action: 'update' as const,
           id: args.id,
           ids: args.ids,
+          account: args.account,
+          accountId: args.accountId,
           date: args.date,
           amount: args.amount,
           payee: args.payee,
@@ -648,30 +676,9 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
         });
       }
 
-      try {
-        const result = await budgetGateway.manageTransactions(normalizedInput);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      } catch (error) {
-        if (error instanceof EntityResolutionError) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(createResourceFacadeErrorResponse(error), null, 2),
-              },
-            ],
-          };
-        }
-        throw error;
-      }
+      return executeResourceFacadeTool(() =>
+        budgetGateway.manageTransactions!(normalizedInput),
+      );
     },
   );
 
@@ -820,15 +827,9 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
         );
       }
       const normalizedInput = stripUndefined(args);
-      const result = await budgetGateway.manageCategories(normalizedInput);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
+      return executeResourceFacadeTool(() =>
+        budgetGateway.manageCategories!(normalizedInput),
+      );
     },
   );
 
@@ -912,31 +913,10 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           'managePayees is not supported by the configured BudgetGateway',
         );
       }
-      try {
-        const normalizedInput = stripUndefined(args);
-        const result = await budgetGateway.managePayees(normalizedInput);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      } catch (error) {
-        if (error instanceof EntityResolutionError) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(error.toEnvelope(), null, 2),
-              },
-            ],
-          };
-        }
-        throw error;
-      }
+      const normalizedInput = stripUndefined(args);
+      return executeResourceFacadeTool(() =>
+        budgetGateway.managePayees!(normalizedInput),
+      );
     },
   );
 
@@ -1023,12 +1003,6 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           .describe(
             'Alias for transferCategory: destination category UUID or name on action: "close".',
           ),
-        forced: z
-          .boolean()
-          .optional()
-          .describe(
-            'Force close an account with a non-zero balance without transferring on action: "close".',
-          ),
       },
       annotations: {
         readOnlyHint: false,
@@ -1036,34 +1010,15 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
       },
     },
     async (args) => {
-      try {
-        if (!budgetGateway.manageAccounts) {
-          throw new Error(
-            'manageAccounts is not supported by the configured BudgetGateway',
-          );
-        }
-        const normalizedInput = stripUndefined(args);
-        const result = await budgetGateway.manageAccounts(normalizedInput);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      } catch (error) {
-        const errorEnvelope = createResourceFacadeErrorResponse(error);
-        return {
-          isError: true,
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(errorEnvelope, null, 2),
-            },
-          ],
-        };
+      if (!budgetGateway.manageAccounts) {
+        throw new Error(
+          'manageAccounts is not supported by the configured BudgetGateway',
+        );
       }
+      const normalizedInput = stripUndefined(args);
+      return executeResourceFacadeTool(() =>
+        budgetGateway.manageAccounts!(normalizedInput),
+      );
     },
   );
 
@@ -1438,15 +1393,9 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
         );
       }
       const normalizedInput = stripUndefined(args);
-      const result = await budgetGateway.manageAutomations(normalizedInput);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
+      return executeResourceFacadeTool(() =>
+        budgetGateway.manageAutomations!(normalizedInput),
+      );
     },
   );
 

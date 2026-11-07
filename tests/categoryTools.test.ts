@@ -184,6 +184,111 @@ describe('Category and Category Group MCP Tools Seam', () => {
     expect(callRes.status).toBe(200);
     expect(callRes.body.result?.isError).toBe(true);
   });
+
+  it('returns structured error envelopes with suggestions over /mcp tools/call when EntityResolutionError or missing transferTo error is thrown', async () => {
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => [],
+      getAccountBalance: async () => 0,
+      getCategoryGroups: async () => [
+        {
+          id: '11111111-1111-4111-8111-111111111111',
+          name: 'Frequent Spending',
+          is_income: false,
+          hidden: false,
+          categories: [
+            {
+              id: '22222222-2222-4222-8222-222222222222',
+              name: 'Groceries',
+              group_id: '11111111-1111-4111-8111-111111111111',
+              is_income: false,
+              hidden: false,
+            },
+            {
+              id: '33333333-3333-4333-8333-333333333333',
+              name: 'Coffee Shops',
+              group_id: '11111111-1111-4111-8111-111111111111',
+              is_income: false,
+              hidden: false,
+            },
+          ],
+        },
+      ],
+      getTransactions: async () => [
+        {
+          id: 'tx-1',
+          account: 'acc-1',
+          date: '2026-11-01',
+          amount: -450,
+          category: '33333333-3333-4333-8333-333333333333',
+        },
+      ],
+      updateCategory: async () => undefined,
+      deleteCategory: async () => undefined,
+    };
+
+    const gateway = createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+    });
+    const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
+
+    // 1. EntityResolutionError over /mcp tools/call
+    const notFoundRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 22,
+        method: 'tools/call',
+        params: {
+          name: 'manage_categories',
+          arguments: {
+            action: 'update',
+            name: 'Groceris',
+            newName: 'Supermarket',
+          },
+        },
+      });
+
+    expect(notFoundRes.status).toBe(200);
+    expect(notFoundRes.body.result?.isError).toBe(true);
+    const notFoundPayload = JSON.parse(notFoundRes.body.result.content[0].text);
+    expect(notFoundPayload.success).toBe(false);
+    expect(notFoundPayload.entityType).toBe('category');
+    expect(notFoundPayload.input).toBe('Groceris');
+    expect(notFoundPayload.suggestions).toContain('Groceries');
+
+    // 2. Missing transferTo error over /mcp tools/call
+    const missingTransferRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 23,
+        method: 'tools/call',
+        params: {
+          name: 'manage_categories',
+          arguments: {
+            action: 'delete',
+            name: 'Coffee Shops',
+          },
+        },
+      });
+
+    expect(missingTransferRes.status).toBe(200);
+    expect(missingTransferRes.body.result?.isError).toBe(true);
+    const missingTransferPayload = JSON.parse(missingTransferRes.body.result.content[0].text);
+    expect(missingTransferPayload.success).toBe(false);
+    expect(missingTransferPayload.message).toMatch(/transferTo/i);
+    expect(missingTransferPayload.suggestions).toContain('Groceries');
+  });
 });
 
 describe('manageCategories Gateway Seam (ActualBudgetGateway)', () => {

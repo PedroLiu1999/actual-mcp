@@ -485,6 +485,125 @@ describe('manage_transactions Deep Resource Facade', () => {
       ).rejects.toThrow(EntityResolutionError);
     });
 
+    it('resolves account name to UUID on action: "update" and updates the transaction account', async () => {
+      const events: Array<{ step: string; args?: unknown }> = [];
+      const storedTransactions = [
+        {
+          id: 'tx-acct-move',
+          account: '88888888-8888-4888-8888-888888888888',
+          date: '2026-11-01',
+          amount: -10000,
+          payee: '66666666-6666-4666-8666-666666666666',
+          category: '22222222-2222-4222-8222-222222222222',
+          notes: 'Transfer to savings',
+          cleared: true,
+        },
+      ];
+
+      const fakeApi: ActualApiAdapter = {
+        getAccounts: async () => [
+          { id: '88888888-8888-4888-8888-888888888888', name: 'Main Checking' },
+          { id: '99999999-9999-4999-8999-999999999999', name: 'Savings' },
+        ],
+        getAccountBalance: async () => 0,
+        getCategories: async () => [
+          {
+            id: '22222222-2222-4222-8222-222222222222',
+            name: 'Groceries',
+            group_id: 'grp-1',
+          },
+        ],
+        getPayees: async () => [
+          { id: '66666666-6666-4666-8666-666666666666', name: 'Starbucks' },
+        ],
+        getTransactions: async () => storedTransactions.map((tx) => ({ ...tx })),
+        sync: async () => {
+          events.push({ step: 'sync' });
+        },
+        updateTransaction: async (id, fields) => {
+          events.push({ step: 'updateTransaction', args: { id, fields } });
+          const idx = storedTransactions.findIndex((t) => t.id === id);
+          if (idx >= 0) {
+            storedTransactions[idx] = {
+              ...storedTransactions[idx]!,
+              ...(fields as Partial<(typeof storedTransactions)[number]>),
+            };
+          }
+          return storedTransactions;
+        },
+      };
+
+      const gateway = createActualBudgetGateway({
+        syncId: '11111111-2222-3333-4444-555555555555',
+        api: fakeApi,
+      });
+
+      const app = createApp({ config: testConfig, budgetGateway: gateway });
+      const token = await issueBearerToken(app);
+
+      const callRes = await request(app)
+        .post('/mcp')
+        .set('Host', 'mcp.example.com')
+        .set('Authorization', `Bearer ${token}`)
+        .set('Accept', 'application/json, text/event-stream')
+        .set('Content-Type', 'application/json')
+        .send({
+          jsonrpc: '2.0',
+          id: 99,
+          method: 'tools/call',
+          params: {
+            name: 'manage_transactions',
+            arguments: {
+              action: 'update',
+              id: 'tx-acct-move',
+              account: 'Savings',
+            },
+          },
+        });
+
+      expect(callRes.status).toBe(200);
+      expect(callRes.body.result?.isError).toBeFalsy();
+      const parsed = JSON.parse(callRes.body.result.content[0].text);
+      expect(parsed).toEqual({
+        success: true,
+        message: 'Updated 1 transaction.',
+        data: {
+          updated: [
+            expect.objectContaining({
+              id: 'tx-acct-move',
+              account: '99999999-9999-4999-8999-999999999999',
+              accountId: '99999999-9999-4999-8999-999999999999',
+              accountName: 'Savings',
+            }),
+          ],
+          previous: [
+            expect.objectContaining({
+              id: 'tx-acct-move',
+              account: '88888888-8888-4888-8888-888888888888',
+              accountId: '88888888-8888-4888-8888-888888888888',
+              accountName: 'Main Checking',
+            }),
+          ],
+        },
+        resolved: {
+          Savings: '99999999-9999-4999-8999-999999999999',
+        },
+      });
+      expect(events).toEqual([
+        { step: 'sync' },
+        {
+          step: 'updateTransaction',
+          args: {
+            id: 'tx-acct-move',
+            fields: {
+              account: '99999999-9999-4999-8999-999999999999',
+            },
+          },
+        },
+        { step: 'sync' },
+      ]);
+    });
+
     it('bulk updates multiple transaction IDs in a single mutex write operation', async () => {
       const events: Array<{ step: string; args?: unknown }> = [];
       const storedTransactions = [

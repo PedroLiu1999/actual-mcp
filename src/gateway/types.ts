@@ -7,6 +7,15 @@ export type {
   ParsedStructuredAqlQuery,
   StructuredAqlQueryInput,
 } from './aql.js';
+export type {
+  BudgetCacheSource,
+  ResolvableCandidate,
+  ResolvableEntityType,
+  ResolvedEntity,
+  ResolveEntityOptions,
+  ResourceFacadeErrorResult,
+  ResourceFacadeResult,
+} from './resolver.js';
 
 export type AccountType =
   | 'checking'

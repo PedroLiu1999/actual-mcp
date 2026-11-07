@@ -6,9 +6,9 @@
 
 **Status:** ready-for-agent
 
-- [ ] Resolves category and group names to internal UUIDs against the local Budget Cache case-insensitively.
-- [ ] Resolves payee and account names to internal UUIDs against the local Budget Cache case-insensitively.
-- [ ] Accepts UUIDs directly without unnecessary lookups when a UUID is already provided.
-- [ ] Returns structured fuzzy suggestions of closest matching entity names when a name resolution fails.
-- [ ] Formats a uniform result envelope containing `success: true`, a human-readable confirmation `message`, the mutated `data` payload with Decimal Amounts, and a `resolved` map of names to UUIDs.
-- [ ] Unit tests verify resolution, case insensitivity, direct UUID passthrough, fuzzy suggestions, and envelope formatting.
+- [x] Resolves category and group names to internal UUIDs against the local Budget Cache case-insensitively.
+- [x] Resolves payee and account names to internal UUIDs against the local Budget Cache case-insensitively.
+- [x] Accepts UUIDs directly without unnecessary lookups when a UUID is already provided.
+- [x] Returns structured fuzzy suggestions of closest matching entity names when a name resolution fails.
+- [x] Formats a uniform result envelope containing `success: true`, a human-readable confirmation `message`, the mutated `data` payload with Decimal Amounts, and a `resolved` map of names to UUIDs.
+- [x] Unit tests verify resolution, case insensitivity, direct UUID passthrough, fuzzy suggestions, and envelope formatting.

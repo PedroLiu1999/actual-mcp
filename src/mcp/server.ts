@@ -947,6 +947,102 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
   );
 
   server.registerTool(
+    'manage_categories',
+    {
+      title: 'Manage Categories',
+      description:
+        'Deep Resource Facade for category and category group lifecycle operations (create, update, delete, move). Accepts human-readable names or UUIDs, resolves identifiers in-process against the Budget Cache, automatically creates missing category groups when creating or moving a category, and enforces safe transaction reassignment on deletion.',
+      inputSchema: {
+        action: z
+          .enum(['create', 'update', 'delete', 'move'])
+          .describe(
+            "Lifecycle action to perform: 'create', 'update', 'delete', or 'move'.",
+          ),
+        target: z
+          .enum(['category', 'group'])
+          .default('category')
+          .describe("Target entity type: 'category' (default) or 'group'."),
+        id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Target category or category group UUID or name (for update, delete, or move).',
+          ),
+        name: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Category or category group name (required for create; can also identify target for update, delete, or move).',
+          ),
+        newName: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('New name when renaming a category or category group during update.'),
+        group: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Parent category group name or UUID (auto-created in-process if not found during category create or move).',
+          ),
+        groupId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Parent category group UUID or name (alias for group).'),
+        isIncome: z
+          .boolean()
+          .optional()
+          .describe('Whether the category or category group represents an income stream.'),
+        hidden: z
+          .boolean()
+          .optional()
+          .describe(
+            'Whether the category or category group is hidden from active budget views.',
+          ),
+        transferTo: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Destination category name or UUID to reassign existing transactions to when deleting a non-empty category or group.',
+          ),
+        transferCategoryId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Destination category UUID or name for deletion reassignment (alias for transferTo).',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+      },
+    },
+    async (args) => {
+      if (!budgetGateway.manageCategories) {
+        throw new Error(
+          'manageCategories is not supported by the configured BudgetGateway',
+        );
+      }
+      const normalizedInput = stripUndefined(args);
+      const result = await budgetGateway.manageCategories(normalizedInput);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
     'create_payee',
     {
       title: 'Create Payee',

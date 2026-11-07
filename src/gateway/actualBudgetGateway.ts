@@ -2,6 +2,12 @@ import fs from 'node:fs';
 import * as actualApi from '@actual-app/api';
 import { decimalToMinorAmount, minorToDecimalAmount, toMinorUnits } from '../currency.js';
 import {
+  createResourceFacadeResponse,
+  EntityResolutionError,
+  resolveCategory,
+  resolveCategoryGroup,
+} from './resolver.js';
+import {
   collectMonetaryKeys,
   compileStructuredAqlQuery,
   convertAqlRowAmounts,
@@ -32,7 +38,9 @@ import type {
   DeleteTransactionResult,
   GetSpendingSummaryInput,
   GetTransactionsFilter,
+  ManageCategoriesInput,
   PayeeSummary,
+  ResourceFacadeResult,
   RunBankSyncResult,
   SetBudgetAmountInput,
   SetBudgetAmountResult,
@@ -312,6 +320,7 @@ export interface ActualBudgetGateway extends BudgetGateway {
   createCategoryGroup(input: CreateCategoryGroupInput): Promise<CreateCategoryGroupResult>;
   updateCategoryGroup(input: UpdateCategoryGroupInput): Promise<UpdateCategoryGroupResult>;
   deleteCategoryGroup(input: DeleteCategoryGroupInput): Promise<DeleteCategoryGroupResult>;
+  manageCategories(input: ManageCategoriesInput): Promise<ResourceFacadeResult<unknown>>;
   setBudgetCarryover(
     month: string,
     categoryId: string,
@@ -1384,6 +1393,513 @@ export function createActualBudgetGateway(
         }
         await apiAdapter.deleteCategoryGroup(input.id, input.transferCategoryId);
         return { id: input.id, success: true };
+      });
+    },
+    async manageCategories(
+      input: ManageCategoriesInput,
+    ): Promise<ResourceFacadeResult<unknown>> {
+      const target = input.target ?? 'category';
+
+      return executeWrite(async (apiAdapter) => {
+        const resolved: Record<string, string> = {};
+
+        if (input.action === 'create') {
+          const name = input.name?.trim();
+          if (!name) {
+            throw new Error('manage_categories create requires a non-empty name');
+          }
+
+          if (target === 'group') {
+            if (!apiAdapter.createCategoryGroup) {
+              throw new Error(
+                'createCategoryGroup is not supported by the current API adapter',
+              );
+            }
+            const groupId = await apiAdapter.createCategoryGroup({
+              name,
+              ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
+              ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+            });
+            resolved[input.name!] = groupId;
+            return createResourceFacadeResponse({
+              message: `Created category group "${name}" (${groupId}).`,
+              data: {
+                id: groupId,
+                name,
+                ...(input.isIncome !== undefined ? { isIncome: input.isIncome } : {}),
+                ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+              },
+              resolved,
+            });
+          }
+
+          const groupRef = input.group ?? input.groupId;
+          if (!groupRef?.trim()) {
+            throw new Error(
+              'manage_categories create for a category requires a group or groupId',
+            );
+          }
+
+          let groupId: string;
+          let groupName: string;
+          let groupCreated = false;
+
+          try {
+            const matchedGroup = await resolveCategoryGroup(
+              groupRef,
+              apiAdapter,
+              resolved,
+            );
+            groupId = matchedGroup.id;
+            groupName = matchedGroup.name ?? groupRef;
+          } catch (error) {
+            if (!(error instanceof EntityResolutionError)) {
+              throw error;
+            }
+            if (!apiAdapter.createCategoryGroup) {
+              throw new Error(
+                'createCategoryGroup is not supported by the current API adapter',
+              );
+            }
+            groupName = groupRef.trim();
+            groupId = await apiAdapter.createCategoryGroup({
+              name: groupName,
+              ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
+            });
+            groupCreated = true;
+            resolved[groupRef] = groupId;
+          }
+
+          if (!apiAdapter.createCategory) {
+            throw new Error(
+              'createCategory is not supported by the current API adapter',
+            );
+          }
+          const categoryId = await apiAdapter.createCategory({
+            name,
+            group_id: groupId,
+            ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
+            ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+          });
+          resolved[input.name!] = categoryId;
+
+          return createResourceFacadeResponse({
+            message: groupCreated
+              ? `Created category "${name}" (${categoryId}) in newly created group "${groupName}" (${groupId}).`
+              : `Created category "${name}" (${categoryId}) in group "${groupName}" (${groupId}).`,
+            data: {
+              id: categoryId,
+              name,
+              groupId,
+              ...(groupCreated ? { groupCreated: true } : {}),
+              ...(input.isIncome !== undefined ? { isIncome: input.isIncome } : {}),
+              ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+            },
+            resolved,
+          });
+        }
+
+        if (input.action === 'update') {
+          const targetRef = input.id ?? input.name;
+          if (!targetRef?.trim()) {
+            throw new Error(
+              'manage_categories update requires a target id or name',
+            );
+          }
+          const effectiveNewName =
+            input.newName ?? (input.id !== undefined ? input.name : undefined);
+
+          if (target === 'group') {
+            if (!apiAdapter.updateCategoryGroup) {
+              throw new Error(
+                'updateCategoryGroup is not supported by the current API adapter',
+              );
+            }
+            const targetGroup = await resolveCategoryGroup(
+              targetRef,
+              apiAdapter,
+              resolved,
+            );
+            const fields: Record<string, unknown> = {};
+            if (effectiveNewName !== undefined) fields.name = effectiveNewName;
+            if (input.isIncome !== undefined) fields.is_income = input.isIncome;
+            if (input.hidden !== undefined) fields.hidden = input.hidden;
+
+            await apiAdapter.updateCategoryGroup(targetGroup.id, fields);
+            const updatedName = effectiveNewName ?? targetGroup.name ?? targetGroup.id;
+
+            return createResourceFacadeResponse({
+              message: `Updated category group "${updatedName}" (${targetGroup.id}).`,
+              data: {
+                id: targetGroup.id,
+                name: updatedName,
+                ...(input.isIncome !== undefined ? { isIncome: input.isIncome } : {}),
+                ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+              },
+              resolved,
+            });
+          }
+
+          if (!apiAdapter.updateCategory) {
+            throw new Error(
+              'updateCategory is not supported by the current API adapter',
+            );
+          }
+          const targetCat = await resolveCategory(
+            targetRef,
+            apiAdapter,
+            resolved,
+          );
+          const groupRef = input.group ?? input.groupId;
+          let resolvedGroupId: string | undefined;
+          if (groupRef !== undefined && groupRef.trim() !== '') {
+            const matchedGroup = await resolveCategoryGroup(
+              groupRef,
+              apiAdapter,
+              resolved,
+            );
+            resolvedGroupId = matchedGroup.id;
+          }
+
+          const fields: Record<string, unknown> = {};
+          if (effectiveNewName !== undefined) fields.name = effectiveNewName;
+          if (resolvedGroupId !== undefined) fields.group_id = resolvedGroupId;
+          if (input.isIncome !== undefined) fields.is_income = input.isIncome;
+          if (input.hidden !== undefined) fields.hidden = input.hidden;
+
+          await apiAdapter.updateCategory(targetCat.id, fields);
+          const updatedName = effectiveNewName ?? targetCat.name ?? targetCat.id;
+
+          return createResourceFacadeResponse({
+            message: `Updated category "${updatedName}" (${targetCat.id}).`,
+            data: {
+              id: targetCat.id,
+              name: updatedName,
+              ...(resolvedGroupId !== undefined ? { groupId: resolvedGroupId } : {}),
+              ...(input.isIncome !== undefined ? { isIncome: input.isIncome } : {}),
+              ...(input.hidden !== undefined ? { hidden: input.hidden } : {}),
+            },
+            resolved,
+          });
+        }
+
+        if (input.action === 'move') {
+          if (target === 'group') {
+            throw new Error(
+              'manage_categories move is only supported for categories (target: "category")',
+            );
+          }
+          const targetRef = input.id ?? input.name;
+          if (!targetRef?.trim()) {
+            throw new Error(
+              'manage_categories move requires a category id or name',
+            );
+          }
+          const groupRef = input.group ?? input.groupId;
+          if (!groupRef?.trim()) {
+            throw new Error(
+              'manage_categories move requires a destination group or groupId',
+            );
+          }
+          if (!apiAdapter.updateCategory) {
+            throw new Error(
+              'updateCategory is not supported by the current API adapter',
+            );
+          }
+
+          const targetCat = await resolveCategory(
+            targetRef,
+            apiAdapter,
+            resolved,
+          );
+
+          let groupId: string;
+          let groupName: string;
+          let groupCreated = false;
+
+          try {
+            const matchedGroup = await resolveCategoryGroup(
+              groupRef,
+              apiAdapter,
+              resolved,
+            );
+            groupId = matchedGroup.id;
+            groupName = matchedGroup.name ?? groupRef;
+          } catch (error) {
+            if (!(error instanceof EntityResolutionError)) {
+              throw error;
+            }
+            if (!apiAdapter.createCategoryGroup) {
+              throw new Error(
+                'createCategoryGroup is not supported by the current API adapter',
+              );
+            }
+            groupName = groupRef.trim();
+            groupId = await apiAdapter.createCategoryGroup({
+              name: groupName,
+              ...(input.isIncome !== undefined ? { is_income: input.isIncome } : {}),
+            });
+            groupCreated = true;
+            resolved[groupRef] = groupId;
+          }
+
+          await apiAdapter.updateCategory(targetCat.id, { group_id: groupId });
+          const categoryLabel = targetCat.name ?? targetCat.id;
+
+          return createResourceFacadeResponse({
+            message: groupCreated
+              ? `Moved category "${categoryLabel}" (${targetCat.id}) to newly created group "${groupName}" (${groupId}).`
+              : `Moved category "${categoryLabel}" (${targetCat.id}) to group "${groupName}" (${groupId}).`,
+            data: {
+              id: targetCat.id,
+              name: categoryLabel,
+              groupId,
+              ...(groupCreated ? { groupCreated: true } : {}),
+            },
+            resolved,
+          });
+        }
+
+        if (input.action === 'delete') {
+          const targetRef = input.id ?? input.name;
+          if (!targetRef?.trim()) {
+            throw new Error(
+              'manage_categories delete requires a target id or name',
+            );
+          }
+          const transferRef = input.transferTo ?? input.transferCategoryId;
+
+          const rawGroups = (await apiAdapter.getCategoryGroups?.()) ?? [];
+          const needsFallbackCats = rawGroups.some(
+            (g) => !Array.isArray(g.categories),
+          );
+          const fallbackCats =
+            needsFallbackCats && apiAdapter.getCategories
+              ? await apiAdapter.getCategories()
+              : [];
+          const allCategories =
+            rawGroups.length > 0
+              ? rawGroups.flatMap((g) =>
+                  Array.isArray(g.categories)
+                    ? g.categories
+                    : fallbackCats.filter((c) => c.group_id === g.id),
+                )
+              : apiAdapter.getCategories
+                ? await apiAdapter.getCategories()
+                : [];
+
+          const countTransactionsForCategories = async (
+            categoryIds: Set<string>,
+          ): Promise<number> => {
+            if (!apiAdapter.getTransactions || categoryIds.size === 0) {
+              return 0;
+            }
+            const txs = (await apiAdapter.getTransactions('', '', '')) ?? [];
+            let count = 0;
+            const checkTx = (tx: ActualTransactionRecord): void => {
+              if (tx.category && categoryIds.has(tx.category)) {
+                count += 1;
+              }
+              if (Array.isArray(tx.subtransactions)) {
+                for (const sub of tx.subtransactions) {
+                  checkTx(sub);
+                }
+              }
+            };
+            for (const tx of txs) {
+              checkTx(tx);
+            }
+            return count;
+          };
+
+          const buildTransferRequiredError = (
+            entityLabel: string,
+            excludedCategoryIds: Set<string>,
+          ): Error & { suggestions: string[] } => {
+            const suggestions = allCategories
+              .filter((c) => !excludedCategoryIds.has(c.id) && Boolean(c.name))
+              .map((c) => c.name);
+            const suggestionSuffix =
+              suggestions.length > 0
+                ? ` Available transferTo categories: ${suggestions.map((s) => `"${s}"`).join(', ')}.`
+                : '';
+            const err = new Error(
+              `Cannot delete ${entityLabel} because it has existing transactions. Specify a "transferTo" category (name or UUID) to reassign transactions safely.${suggestionSuffix}`,
+            ) as Error & { suggestions: string[] };
+            err.suggestions = suggestions;
+            return err;
+          };
+
+          if (target === 'group') {
+            if (!apiAdapter.deleteCategoryGroup) {
+              throw new Error(
+                'deleteCategoryGroup is not supported by the current API adapter',
+              );
+            }
+            const targetGroup = await resolveCategoryGroup(
+              targetRef,
+              apiAdapter,
+              resolved,
+            );
+            const groupRecord = rawGroups.find((g) => g.id === targetGroup.id);
+            const groupCategories = groupRecord
+              ? Array.isArray(groupRecord.categories)
+                ? groupRecord.categories
+                : fallbackCats.filter((c) => c.group_id === groupRecord.id)
+              : allCategories.filter((c) => c.group_id === targetGroup.id);
+            const memberCategoryIds = new Set(groupCategories.map((c) => c.id));
+            const groupLabel = targetGroup.name ?? targetGroup.id;
+
+            let transferCategoryId: string | undefined;
+            if (transferRef !== undefined && transferRef.trim() !== '') {
+              const transferCat = await resolveCategory(
+                transferRef,
+                apiAdapter,
+                resolved,
+              );
+              if (memberCategoryIds.has(transferCat.id)) {
+                throw new Error(
+                  `Cannot transfer transactions to category "${transferCat.name ?? transferCat.id}" because it belongs to the category group "${groupLabel}" being deleted.`,
+                );
+              }
+              transferCategoryId = transferCat.id;
+            } else {
+              const txCount =
+                await countTransactionsForCategories(memberCategoryIds);
+              if (
+                txCount > 0 ||
+                (!apiAdapter.getTransactions && memberCategoryIds.size > 0)
+              ) {
+                throw buildTransferRequiredError(
+                  `category group "${groupLabel}" (${targetGroup.id})`,
+                  memberCategoryIds,
+                );
+              }
+            }
+
+            let delRes: unknown;
+            try {
+              delRes = await apiAdapter.deleteCategoryGroup(
+                targetGroup.id,
+                transferCategoryId,
+              );
+            } catch (err) {
+              if (!transferCategoryId) {
+                throw buildTransferRequiredError(
+                  `category group "${groupLabel}" (${targetGroup.id})`,
+                  memberCategoryIds,
+                );
+              }
+              throw err;
+            }
+            if (
+              !transferCategoryId &&
+              delRes &&
+              typeof delRes === 'object' &&
+              'error' in delRes &&
+              Boolean((delRes as { error?: unknown }).error)
+            ) {
+              throw buildTransferRequiredError(
+                `category group "${groupLabel}" (${targetGroup.id})`,
+                memberCategoryIds,
+              );
+            }
+
+            return createResourceFacadeResponse({
+              message: transferCategoryId
+                ? `Deleted category group "${groupLabel}" (${targetGroup.id}) and transferred transactions to ${transferCategoryId}.`
+                : `Deleted category group "${groupLabel}" (${targetGroup.id}).`,
+              data: {
+                id: targetGroup.id,
+                name: groupLabel,
+                ...(transferCategoryId ? { transferCategoryId } : {}),
+              },
+              resolved,
+            });
+          }
+
+          if (!apiAdapter.deleteCategory) {
+            throw new Error(
+              'deleteCategory is not supported by the current API adapter',
+            );
+          }
+          const targetCat = await resolveCategory(
+            targetRef,
+            apiAdapter,
+            resolved,
+          );
+          const categoryRecord = allCategories.find(
+            (c) => c.id === targetCat.id,
+          );
+          const categoryLabel =
+            targetCat.name ?? categoryRecord?.name ?? targetCat.id;
+          const deletedSet = new Set([targetCat.id]);
+
+          let transferCategoryId: string | undefined;
+          if (transferRef !== undefined && transferRef.trim() !== '') {
+            const transferCat = await resolveCategory(
+              transferRef,
+              apiAdapter,
+              resolved,
+            );
+            if (transferCat.id === targetCat.id) {
+              throw new Error(
+                `Cannot transfer transactions to the same category being deleted ("${categoryLabel}").`,
+              );
+            }
+            transferCategoryId = transferCat.id;
+          } else {
+            const txCount = await countTransactionsForCategories(deletedSet);
+            if (txCount > 0) {
+              throw buildTransferRequiredError(
+                `category "${categoryLabel}" (${targetCat.id})`,
+                deletedSet,
+              );
+            }
+          }
+
+          let delRes: unknown;
+          try {
+            delRes = await apiAdapter.deleteCategory(
+              targetCat.id,
+              transferCategoryId,
+            );
+          } catch (err) {
+            if (!transferCategoryId) {
+              throw buildTransferRequiredError(
+                `category "${categoryLabel}" (${targetCat.id})`,
+                deletedSet,
+              );
+            }
+            throw err;
+          }
+          if (
+            !transferCategoryId &&
+            delRes &&
+            typeof delRes === 'object' &&
+            'error' in delRes &&
+            Boolean((delRes as { error?: unknown }).error)
+          ) {
+            throw buildTransferRequiredError(
+              `category "${categoryLabel}" (${targetCat.id})`,
+              deletedSet,
+            );
+          }
+
+          return createResourceFacadeResponse({
+            message: transferCategoryId
+              ? `Deleted category "${categoryLabel}" (${targetCat.id}) and transferred transactions to ${transferCategoryId}.`
+              : `Deleted category "${categoryLabel}" (${targetCat.id}).`,
+            data: {
+              id: targetCat.id,
+              name: categoryLabel,
+              ...(transferCategoryId ? { transferCategoryId } : {}),
+            },
+            resolved,
+          });
+        }
+
+        throw new Error(`Unsupported manage_categories action: ${input.action}`);
       });
     },
     async setBudgetCarryover(

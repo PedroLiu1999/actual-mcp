@@ -116,10 +116,13 @@ export interface BudgetMonthSummary {
 }
 
 export interface GetTransactionsFilter {
+  account?: string;
   accountId?: string;
   startDate?: string;
   endDate?: string;
+  category?: string;
   categoryId?: string;
+  payee?: string;
   payeeId?: string;
   searchText?: string;
   limit?: number;
@@ -249,7 +252,8 @@ export type ManageTransactionsInput =
 
 export interface SetBudgetAmountInput {
   month: string;
-  categoryId: string;
+  category?: string;
+  categoryId?: string;
   /** Monthly budgeted envelope allocation expressed as a Decimal Amount. */
   budgeted?: number;
   carryover?: boolean;
@@ -258,8 +262,29 @@ export interface SetBudgetAmountInput {
 export interface SetBudgetAmountResult {
   month: string;
   categoryId: string;
+  categoryName?: string;
   previous: BudgetMonthCategorySummary;
   updated: BudgetMonthCategorySummary;
+}
+
+export interface SetBudgetCarryoverInput {
+  month: string;
+  category?: string;
+  categoryId?: string;
+  carryover: boolean;
+}
+
+export interface SetBudgetCarryoverResult {
+  month: string;
+  categoryId: string;
+  categoryName?: string;
+  carryover: boolean;
+  previousCarryover?: boolean;
+}
+
+export interface RunBankSyncInput {
+  account?: string;
+  accountId?: string;
 }
 
 export interface BudgetReadiness {
@@ -592,9 +617,9 @@ export interface BudgetGateway {
   manageCategories?(input: ManageCategoriesInput): Promise<ResourceFacadeResult<unknown>>;
   setBudgetCarryover?(
     month: string,
-    categoryId: string,
+    category: string,
     carryover: boolean,
-  ): Promise<void>;
+  ): Promise<SetBudgetCarryoverResult | void>;
   holdBudgetForNextMonth?(month: string, amount: number): Promise<boolean>;
   resetBudgetHold?(month: string): Promise<void>;
   createPayee?(payee: { name: string }): Promise<{ id: string }>;
@@ -617,7 +642,7 @@ export interface BudgetGateway {
   ): Promise<{ id: string }>;
   reopenAccount?(id: string): Promise<{ id: string }>;
   manageAccounts?(input: ManageAccountsInput): Promise<ResourceFacadeResult<unknown>>;
-  runBankSync?(accountId?: string): Promise<RunBankSyncResult>;
+  runBankSync?(account?: string): Promise<RunBankSyncResult>;
   listSchedules?(options?: { forceSync?: boolean }): Promise<ScheduleSummary[]>;
   getScheduleDates?(input: GetScheduleDatesInput): Promise<string[]>;
   createSchedule?(input: CreateScheduleInput): Promise<{ id: string }>;

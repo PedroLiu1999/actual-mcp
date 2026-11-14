@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Gateway input types (`GetTransactionsFilter`, `SetBudgetAmountInput`, `SetBudgetCarryoverInput`, `RunBankSyncInput`) define primary human-friendly parameter names (`account`, `category`, `payee`) accepting names or UUIDs, while retaining `*Id` as backward-compatible aliases.
-- [ ] Gateway response types for budget envelope mutations (`SetBudgetAmountResult`, `SetBudgetCarryoverResult`) include `categoryName` on both `previous` and `updated` envelope states.
-- [ ] In-process resolution helpers support resolving single entities with fail-fast `EntityResolutionError` and fuzzy suggestions for non-existent names without remote sync roundtrips.
-- [ ] Unit tests verify that name and UUID resolution behaves deterministically, case-insensitively, and surfaces helpful suggestions on typos.
+- [x] Gateway input types (`GetTransactionsFilter`, `SetBudgetAmountInput`, `SetBudgetCarryoverInput`, `RunBankSyncInput`) define primary human-friendly parameter names (`account`, `category`, `payee`) accepting names or UUIDs, while retaining `*Id` as backward-compatible aliases.
+- [x] Gateway response types for budget envelope mutations (`SetBudgetAmountResult`, `SetBudgetCarryoverResult`) include `categoryName` on both `previous` and `updated` envelope states.
+- [x] In-process resolution helpers support resolving single entities with fail-fast `EntityResolutionError` and fuzzy suggestions for non-existent names without remote sync roundtrips.
+- [x] Unit tests verify that name and UUID resolution behaves deterministically, case-insensitively, and surfaces helpful suggestions on typos.

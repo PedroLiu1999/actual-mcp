@@ -365,6 +365,14 @@ function resolveFromArray<T extends ResolvableCandidate>(
 ): ResolvedEntity<T> {
   const requireUuidMatch = Boolean(options?.requireUuidMatch);
 
+  if (candidates.length === 0 && !requireUuidMatch) {
+    return {
+      id: trimmed,
+      input,
+      matchedBy: isUuid(trimmed) ? 'uuid' : 'id',
+    };
+  }
+
   if (isUuid(trimmed)) {
     const lowerId = trimmed.toLowerCase();
     const idMatch = candidates.find((c) => c.id.toLowerCase() === lowerId);
@@ -553,4 +561,53 @@ export async function resolveSchedule(
     { entityType: 'schedule', ...(resolved ? { resolved } : {}) },
   );
 }
+
+export async function resolveCategoryReference(
+  ref: { category?: string; categoryId?: string } | string,
+  source: BudgetCacheSource,
+  resolved?: Record<string, string>,
+): Promise<ResolvedEntity<CategorySummary>> {
+  const value = typeof ref === 'string' ? ref : (ref.category ?? ref.categoryId);
+  if (!value || !value.trim()) {
+    throw new EntityResolutionError({
+      entityType: 'category',
+      input: '',
+      suggestions: [],
+    });
+  }
+  return resolveCategory(value, source, resolved);
+}
+
+export async function resolveAccountReference(
+  ref: { account?: string; accountId?: string } | string,
+  source: BudgetCacheSource,
+  resolved?: Record<string, string>,
+): Promise<ResolvedEntity<AccountSummary | { id: string; name: string }>> {
+  const value = typeof ref === 'string' ? ref : (ref.account ?? ref.accountId);
+  if (!value || !value.trim()) {
+    throw new EntityResolutionError({
+      entityType: 'account',
+      input: '',
+      suggestions: [],
+    });
+  }
+  return resolveAccount(value, source, resolved);
+}
+
+export async function resolvePayeeReference(
+  ref: { payee?: string; payeeId?: string } | string,
+  source: BudgetCacheSource,
+  resolved?: Record<string, string>,
+): Promise<ResolvedEntity<PayeeSummary>> {
+  const value = typeof ref === 'string' ? ref : (ref.payee ?? ref.payeeId);
+  if (!value || !value.trim()) {
+    throw new EntityResolutionError({
+      entityType: 'payee',
+      input: '',
+      suggestions: [],
+    });
+  }
+  return resolvePayee(value, source, resolved);
+}
+
 

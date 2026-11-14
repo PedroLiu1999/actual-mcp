@@ -105,7 +105,7 @@ describe('HTTP application seam — set_budget_amount tool', () => {
         capturedBudgetInput = input;
         return {
           month: input.month,
-          categoryId: input.categoryId,
+          categoryId: input.categoryId ?? input.category ?? 'cat-uuid-1',
           previous: samplePrevious,
           updated: sampleUpdated,
         };
@@ -621,6 +621,7 @@ describe('BudgetGateway seam — createActualBudgetGateway setBudgetAmount', () 
     expect(result).toEqual({
       month: '2026-11',
       categoryId: 'cat-groceries',
+      categoryName: 'Groceries',
       previous: {
         id: 'cat-groceries',
         name: 'Groceries',

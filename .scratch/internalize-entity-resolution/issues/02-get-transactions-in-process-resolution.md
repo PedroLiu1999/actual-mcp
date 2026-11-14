@@ -4,10 +4,10 @@
 
 **Blocked by:** 01: Entity Resolver Gateway Seam Prefactoring & Polymorphic Types
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `get_transactions` MCP tool schema defines `account`, `category`, and `payee` as primary filter inputs, preserving `accountId`, `categoryId`, and `payeeId` as backward-compatible aliases.
-- [ ] Gateway resolves `account`, `category`, and `payee` against the local Budget Cache before querying transactions.
-- [ ] Invalid or misspelled entity names trigger an `EntityResolutionError` formatted with fuzzy suggestions, preventing silent empty-result responses.
-- [ ] Passing raw storage UUIDs continues to work without regression.
-- [ ] End-to-end MCP tool tests verify that filtering by category name, account name, payee name, and their legacy ID aliases returns the expected enriched transaction records.
+- [x] `get_transactions` MCP tool schema defines `account`, `category`, and `payee` as primary filter inputs, preserving `accountId`, `categoryId`, and `payeeId` as backward-compatible aliases.
+- [x] Gateway resolves `account`, `category`, and `payee` against the local Budget Cache before querying transactions.
+- [x] Invalid or misspelled entity names trigger an `EntityResolutionError` formatted with fuzzy suggestions, preventing silent empty-result responses.
+- [x] Passing raw storage UUIDs continues to work without regression.
+- [x] End-to-end MCP tool tests verify that filtering by category name, account name, payee name, and their legacy ID aliases returns the expected enriched transaction records.

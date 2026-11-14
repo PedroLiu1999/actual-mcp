@@ -6,7 +6,10 @@ import {
   structuredAqlQueryInputSchema,
   structuredAqlQueryObjectSchema,
 } from '../gateway/aql.js';
-import { createResourceFacadeErrorResponse } from '../gateway/resolver.js';
+import {
+  createResourceFacadeErrorResponse,
+  EntityResolutionError,
+} from '../gateway/resolver.js';
 import type { BudgetGateway, ManageTransactionsInput } from '../gateway/types.js';
 
 const isoDateSchema = z
@@ -177,17 +180,44 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     {
       title: 'Get Transactions',
       description:
-        'Query transactions with optional filters (accountId, startDate, endDate, categoryId, payeeId, case-insensitive searchText matching payee name or notes, limit default 100 max 500, and forceSync). Returns enriched records with Decimal Amounts and resolved accountName, categoryName, and payeeName alongside their IDs.',
+        'Query transactions with optional filters (account, category, payee accepting names or UUIDs, with accountId, categoryId, payeeId preserved as aliases, startDate, endDate, case-insensitive searchText matching payee name or notes, limit default 100 max 500, and forceSync). Returns enriched records with Decimal Amounts and resolved accountName, categoryName, and payeeName alongside their IDs.',
       inputSchema: {
-        accountId: z.string().optional().describe('Filter by account ID.'),
+        account: z
+          .string()
+          .optional()
+          .describe('Filter by account name or account UUID.'),
+        accountId: z
+          .string()
+          .optional()
+          .describe(
+            'Filter by account UUID or name (backward-compatible alias for account).',
+          ),
         startDate: isoDateSchema
           .optional()
           .describe('Inclusive start date in YYYY-MM-DD format.'),
         endDate: isoDateSchema
           .optional()
           .describe('Inclusive end date in YYYY-MM-DD format.'),
-        categoryId: z.string().optional().describe('Filter by category ID.'),
-        payeeId: z.string().optional().describe('Filter by payee ID.'),
+        category: z
+          .string()
+          .optional()
+          .describe('Filter by category name or category UUID.'),
+        categoryId: z
+          .string()
+          .optional()
+          .describe(
+            'Filter by category UUID or name (backward-compatible alias for category).',
+          ),
+        payee: z
+          .string()
+          .optional()
+          .describe('Filter by payee name or payee UUID.'),
+        payeeId: z
+          .string()
+          .optional()
+          .describe(
+            'Filter by payee UUID or name (backward-compatible alias for payee).',
+          ),
         searchText: z
           .string()
           .optional()
@@ -211,18 +241,33 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     },
     async (args) => {
       const filter = stripUndefined(args);
-      const transactions =
-        (await budgetGateway.getTransactions?.(
-          Object.keys(filter).length > 0 ? filter : undefined,
-        )) ?? [];
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({ transactions }, null, 2),
-          },
-        ],
-      };
+      try {
+        const transactions =
+          (await budgetGateway.getTransactions?.(
+            Object.keys(filter).length > 0 ? filter : undefined,
+          )) ?? [];
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ transactions }, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        if (error instanceof EntityResolutionError) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(createResourceFacadeErrorResponse(error), null, 2),
+              },
+            ],
+          };
+        }
+        throw error;
+      }
     },
   );
 

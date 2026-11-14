@@ -1186,9 +1186,32 @@ export function createActualBudgetGateway(
     ): Promise<TransactionRecord[]> {
       return executeRead(
         async (apiAdapter) => {
+          const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+
+          let resolvedAccountId: string | undefined;
+          const rawAccount = filter?.account ?? filter?.accountId;
+          if (rawAccount !== undefined && rawAccount.trim() !== '') {
+            const res = await resolveAccountReference(rawAccount, cacheSource);
+            resolvedAccountId = res.id;
+          }
+
+          let resolvedCategoryId: string | undefined;
+          const rawCategory = filter?.category ?? filter?.categoryId;
+          if (rawCategory !== undefined && rawCategory.trim() !== '') {
+            const res = await resolveCategoryReference(rawCategory, cacheSource);
+            resolvedCategoryId = res.id;
+          }
+
+          let resolvedPayeeId: string | undefined;
+          const rawPayee = filter?.payee ?? filter?.payeeId;
+          if (rawPayee !== undefined && rawPayee.trim() !== '') {
+            const res = await resolvePayeeReference(rawPayee, cacheSource);
+            resolvedPayeeId = res.id;
+          }
+
           const enriched = await fetchEnrichedTransactions(
             apiAdapter,
-            filter?.accountId ?? '',
+            resolvedAccountId ?? '',
             filter?.startDate ?? '',
             filter?.endDate ?? '',
           );
@@ -1204,7 +1227,7 @@ export function createActualBudgetGateway(
           };
 
           const filtered = enriched.filter((tx) => {
-            if (filter?.accountId && tx.accountId !== filter.accountId) {
+            if (resolvedAccountId && tx.accountId !== resolvedAccountId) {
               return false;
             }
             if (filter?.startDate && tx.date < filter.startDate) {
@@ -1213,19 +1236,19 @@ export function createActualBudgetGateway(
             if (filter?.endDate && tx.date > filter.endDate) {
               return false;
             }
-            if (filter?.categoryId) {
+            if (resolvedCategoryId) {
               const matchesCategory =
-                tx.categoryId === filter.categoryId ||
-                (tx.subtransactions?.some((s) => s.categoryId === filter.categoryId) ??
+                tx.categoryId === resolvedCategoryId ||
+                (tx.subtransactions?.some((s) => s.categoryId === resolvedCategoryId) ??
                   false);
               if (!matchesCategory) {
                 return false;
               }
             }
-            if (filter?.payeeId) {
+            if (resolvedPayeeId) {
               const matchesPayee =
-                tx.payeeId === filter.payeeId ||
-                (tx.subtransactions?.some((s) => s.payeeId === filter.payeeId) ?? false);
+                tx.payeeId === resolvedPayeeId ||
+                (tx.subtransactions?.some((s) => s.payeeId === resolvedPayeeId) ?? false);
               if (!matchesPayee) {
                 return false;
               }

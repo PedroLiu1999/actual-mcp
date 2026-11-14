@@ -6,6 +6,10 @@ import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig, type AppConfig } from '../src/config.js';
+import {
+  createActualBudgetGateway,
+  type ActualApiAdapter,
+} from '../src/gateway/actualBudgetGateway.js';
 import type { BudgetGateway, BudgetReadiness, RunBankSyncResult } from '../src/gateway/types.js';
 import { issueBearerToken } from './helpers/auth.js';
 
@@ -259,5 +263,217 @@ describe('Bank Synchronization MCP Tool Seam', () => {
     expect(callRes.body.result.content[0].text).toContain(
       'runBankSync is not supported by the configured BudgetGateway',
     );
+  });
+});
+
+describe('run_bank_sync in-process entity resolution', () => {
+  const checkingUuid = '88888888-8888-4888-8888-888888888888';
+  const savingsUuid = '99999999-9999-4999-8999-999999999999';
+
+  const fakeAccounts = [
+    { id: checkingUuid, name: 'Checking', offbudget: false, closed: false },
+    { id: savingsUuid, name: 'Chase Sapphire', offbudget: false, closed: false },
+  ];
+
+  function createResolutionGateway(
+    onBankSync: (args?: { accountId?: string }) => Promise<RunBankSyncResult>,
+  ) {
+    const fakeApi: ActualApiAdapter = {
+      getAccounts: async () => fakeAccounts,
+      getAccountBalance: async () => 0,
+      sync: async () => {},
+      runBankSync: onBankSync,
+    };
+
+    return createActualBudgetGateway({
+      syncId: '11111111-2222-3333-4444-555555555555',
+      api: fakeApi,
+    });
+  }
+
+  it('resolves account by human name (case-insensitive) via tools/call', async () => {
+    let capturedArgs: { accountId?: string } | undefined;
+    const gateway = createResolutionGateway(async (args) => {
+      capturedArgs = args;
+      return {
+        updatedAccountIds: [savingsUuid],
+        newTransactionsCount: 3,
+        matchedTransactionsCount: 1,
+      };
+    });
+
+    const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
+
+    const res = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 101,
+        method: 'tools/call',
+        params: {
+          name: 'run_bank_sync',
+          arguments: {
+            account: 'chase sapphire',
+          },
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.result?.isError).toBeFalsy();
+    expect(capturedArgs).toEqual({ accountId: savingsUuid });
+    expect(JSON.parse(res.body.result.content[0].text)).toEqual({
+      updatedAccountIds: [savingsUuid],
+      newTransactionsCount: 3,
+      matchedTransactionsCount: 1,
+    });
+  });
+
+  it('fails fast with EntityResolutionError and fuzzy suggestions on misspelled account name', async () => {
+    let bankSyncCalled = false;
+    const gateway = createResolutionGateway(async () => {
+      bankSyncCalled = true;
+      return {
+        updatedAccountIds: [],
+        newTransactionsCount: 0,
+        matchedTransactionsCount: 0,
+      };
+    });
+
+    const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
+
+    const res = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 102,
+        method: 'tools/call',
+        params: {
+          name: 'run_bank_sync',
+          arguments: {
+            account: 'Checkng',
+          },
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.result?.isError).toBe(true);
+    expect(bankSyncCalled).toBe(false);
+    const parsed = JSON.parse(res.body.result.content[0].text);
+    expect(parsed.success).toBe(false);
+    expect(parsed.entityType).toBe('account');
+    expect(parsed.input).toBe('Checkng');
+    expect(parsed.suggestions).toContain('Checking');
+    expect(parsed.message).toContain('Checking');
+  });
+
+  it('resolves account by UUID via account parameter and via legacy accountId alias', async () => {
+    const capturedCalls: Array<{ accountId?: string } | undefined> = [];
+    const gateway = createResolutionGateway(async (args) => {
+      capturedCalls.push(args);
+      return {
+        updatedAccountIds: [checkingUuid],
+        newTransactionsCount: 2,
+        matchedTransactionsCount: 0,
+      };
+    });
+
+    const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
+
+    const uuidRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 103,
+        method: 'tools/call',
+        params: {
+          name: 'run_bank_sync',
+          arguments: {
+            account: checkingUuid,
+          },
+        },
+      });
+
+    expect(uuidRes.status).toBe(200);
+    expect(uuidRes.body.result?.isError).toBeFalsy();
+
+    const aliasRes = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 104,
+        method: 'tools/call',
+        params: {
+          name: 'run_bank_sync',
+          arguments: {
+            accountId: 'Checking',
+          },
+        },
+      });
+
+    expect(aliasRes.status).toBe(200);
+    expect(aliasRes.body.result?.isError).toBeFalsy();
+    expect(capturedCalls).toEqual([
+      { accountId: checkingUuid },
+      { accountId: checkingUuid },
+    ]);
+  });
+
+  it('triggers synchronization across all linked accounts when account and accountId are omitted', async () => {
+    let calledWithArgs: unknown = 'not-called';
+    const gateway = createResolutionGateway(async (args) => {
+      calledWithArgs = args;
+      return {
+        updatedAccountIds: [checkingUuid, savingsUuid],
+        newTransactionsCount: 4,
+        matchedTransactionsCount: 1,
+      };
+    });
+
+    const app = createApp({ config: testConfig, budgetGateway: gateway });
+    const token = await issueBearerToken(app);
+
+    const res = await request(app)
+      .post('/mcp')
+      .set('Host', 'mcp.example.com')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .send({
+        jsonrpc: '2.0',
+        id: 105,
+        method: 'tools/call',
+        params: {
+          name: 'run_bank_sync',
+          arguments: {},
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.result?.isError).toBeFalsy();
+    expect(calledWithArgs).toBeUndefined();
+    expect(JSON.parse(res.body.result.content[0].text)).toEqual({
+      updatedAccountIds: [checkingUuid, savingsUuid],
+      newTransactionsCount: 4,
+      matchedTransactionsCount: 1,
+    });
   });
 });

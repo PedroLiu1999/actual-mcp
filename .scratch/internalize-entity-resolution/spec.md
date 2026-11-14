@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 
 # Specification: Internalize Entity Identifier Resolution Behind Query and Budget Seams
 

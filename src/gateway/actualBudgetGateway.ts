@@ -5,9 +5,13 @@ import {
   createResourceFacadeResponse,
   EntityResolutionError,
   resolveAccount,
+  resolveAccountReference,
   resolveCategory,
   resolveCategoryGroup,
+  resolveCategoryReference,
+  resolveEntityByNameOrId,
   resolvePayee,
+  resolvePayeeReference,
   resolveSchedule,
   type BudgetCacheSource,
 } from './resolver.js';
@@ -52,6 +56,7 @@ import type {
   RunBankSyncResult,
   SetBudgetAmountInput,
   SetBudgetAmountResult,
+  SetBudgetCarryoverResult,
   SpendingSummary,
   SpendingSummaryGroup,
   TransactionRecord,
@@ -333,9 +338,9 @@ export interface ActualBudgetGateway extends BudgetGateway {
   manageCategories(input: ManageCategoriesInput): Promise<ResourceFacadeResult<unknown>>;
   setBudgetCarryover(
     month: string,
-    categoryId: string,
+    category: string,
     carryover: boolean,
-  ): Promise<void>;
+  ): Promise<SetBudgetCarryoverResult>;
   holdBudgetForNextMonth(month: string, amount: number): Promise<boolean>;
   resetBudgetHold(month: string): Promise<void>;
   createPayee(payee: { name: string }): Promise<{ id: string }>;
@@ -361,7 +366,7 @@ export interface ActualBudgetGateway extends BudgetGateway {
   ): Promise<{ id: string }>;
   reopenAccount(id: string): Promise<{ id: string }>;
   manageAccounts(input: ManageAccountsInput): Promise<ResourceFacadeResult<unknown>>;
-  runBankSync(accountId?: string): Promise<RunBankSyncResult>;
+  runBankSync(account?: string): Promise<RunBankSyncResult>;
   listSchedules(options?: { forceSync?: boolean }): Promise<ScheduleSummary[]>;
   getScheduleDates(input: GetScheduleDatesInput): Promise<string[]>;
   createSchedule(input: CreateScheduleInput): Promise<{ id: string }>;
@@ -1179,9 +1184,37 @@ export function createActualBudgetGateway(
     ): Promise<TransactionRecord[]> {
       return executeRead(
         async (apiAdapter) => {
+          const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+          const resolveOptionalId = async (
+            raw: string | undefined,
+            resolver: (
+              value: string,
+              source: typeof cacheSource,
+            ) => Promise<{ id: string }>,
+          ): Promise<string | undefined> => {
+            if (raw === undefined || raw.trim() === '') {
+              return undefined;
+            }
+            const resolved = await resolver(raw, cacheSource);
+            return resolved.id;
+          };
+
+          const resolvedAccountId = await resolveOptionalId(
+            filter?.account ?? filter?.accountId,
+            resolveAccountReference,
+          );
+          const resolvedCategoryId = await resolveOptionalId(
+            filter?.category ?? filter?.categoryId,
+            resolveCategoryReference,
+          );
+          const resolvedPayeeId = await resolveOptionalId(
+            filter?.payee ?? filter?.payeeId,
+            resolvePayeeReference,
+          );
+
           const enriched = await fetchEnrichedTransactions(
             apiAdapter,
-            filter?.accountId ?? '',
+            resolvedAccountId ?? '',
             filter?.startDate ?? '',
             filter?.endDate ?? '',
           );
@@ -1197,7 +1230,7 @@ export function createActualBudgetGateway(
           };
 
           const filtered = enriched.filter((tx) => {
-            if (filter?.accountId && tx.accountId !== filter.accountId) {
+            if (resolvedAccountId && tx.accountId !== resolvedAccountId) {
               return false;
             }
             if (filter?.startDate && tx.date < filter.startDate) {
@@ -1206,19 +1239,19 @@ export function createActualBudgetGateway(
             if (filter?.endDate && tx.date > filter.endDate) {
               return false;
             }
-            if (filter?.categoryId) {
+            if (resolvedCategoryId) {
               const matchesCategory =
-                tx.categoryId === filter.categoryId ||
-                (tx.subtransactions?.some((s) => s.categoryId === filter.categoryId) ??
+                tx.categoryId === resolvedCategoryId ||
+                (tx.subtransactions?.some((s) => s.categoryId === resolvedCategoryId) ??
                   false);
               if (!matchesCategory) {
                 return false;
               }
             }
-            if (filter?.payeeId) {
+            if (resolvedPayeeId) {
               const matchesPayee =
-                tx.payeeId === filter.payeeId ||
-                (tx.subtransactions?.some((s) => s.payeeId === filter.payeeId) ?? false);
+                tx.payeeId === resolvedPayeeId ||
+                (tx.subtransactions?.some((s) => s.payeeId === resolvedPayeeId) ?? false);
               if (!matchesPayee) {
                 return false;
               }
@@ -1769,15 +1802,42 @@ export function createActualBudgetGateway(
           'setBudgetAmount requires at least one of budgeted or carryover',
         );
       }
+      const rawCategory = input.category ?? input.categoryId;
+      if (!rawCategory || !rawCategory.trim()) {
+        throw new Error('setBudgetAmount requires category or categoryId');
+      }
 
       return executeWrite(async (apiAdapter) => {
         const beforeMonth = await fetchBudgetMonthSummary(apiAdapter, input.month);
+        const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+        const targetRef = (input.category ?? input.categoryId ?? '').trim();
+
+        const monthCategories = beforeMonth.categories.map((c) => ({
+          id: c.id,
+          name: c.name,
+        }));
+        let resolvedCategory: { id: string; name?: string };
+        try {
+          resolvedCategory = resolveEntityByNameOrId(
+            targetRef,
+            monthCategories,
+            { entityType: 'category' },
+          );
+        } catch {
+          resolvedCategory = await resolveCategoryReference(
+            { category: input.category, categoryId: input.categoryId },
+            cacheSource,
+          );
+        }
+        const categoryId = resolvedCategory.id;
+        const categoryName = resolvedCategory.name;
+
         const previous = beforeMonth.categories.find(
-          (c) => c.id === input.categoryId,
+          (c) => c.id === categoryId,
         );
         if (!previous) {
           throw new Error(
-            `Category not found in Budget Month ${input.month}: ${input.categoryId}`,
+            `Category not found in Budget Month ${input.month}: ${categoryId}`,
           );
         }
 
@@ -1789,7 +1849,7 @@ export function createActualBudgetGateway(
           }
           await apiAdapter.setBudgetAmount(
             input.month,
-            input.categoryId,
+            categoryId,
             decimalToMinorAmount(input.budgeted),
           );
         }
@@ -1802,14 +1862,14 @@ export function createActualBudgetGateway(
           }
           await apiAdapter.setBudgetCarryover(
             input.month,
-            input.categoryId,
+            categoryId,
             input.carryover,
           );
         }
 
         const afterMonth = await fetchBudgetMonthSummary(apiAdapter, input.month);
         const updated = afterMonth.categories.find(
-          (c) => c.id === input.categoryId,
+          (c) => c.id === categoryId,
         ) ?? {
           ...previous,
           ...(input.budgeted !== undefined ? { budgeted: input.budgeted } : {}),
@@ -1818,9 +1878,16 @@ export function createActualBudgetGateway(
 
         return {
           month: input.month,
-          categoryId: input.categoryId,
-          previous,
-          updated,
+          categoryId,
+          ...(categoryName ? { categoryName } : {}),
+          previous: {
+            ...previous,
+            ...(categoryName ? { name: categoryName, categoryName } : {}),
+          },
+          updated: {
+            ...updated,
+            ...(categoryName ? { name: categoryName, categoryName } : {}),
+          },
         };
       });
     },
@@ -2406,14 +2473,33 @@ export function createActualBudgetGateway(
     },
     async setBudgetCarryover(
       month: string,
-      categoryId: string,
+      category: string,
       carryover: boolean,
-    ): Promise<void> {
+    ): Promise<SetBudgetCarryoverResult> {
+      if (!category.trim()) {
+        throw new Error('setBudgetCarryover requires category or categoryId');
+      }
+
       return executeWrite(async (apiAdapter) => {
         if (!apiAdapter.setBudgetCarryover) {
           throw new Error('setBudgetCarryover is not supported by the current API adapter');
         }
+        const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+        const resolvedCategory = await resolveCategoryReference(
+          category,
+          cacheSource,
+        );
+        const categoryId = resolvedCategory.id;
+        const categoryName = resolvedCategory.name;
+
         await apiAdapter.setBudgetCarryover(month, categoryId, carryover);
+
+        return {
+          month,
+          categoryId,
+          ...(categoryName ? { categoryName } : {}),
+          carryover,
+        };
       });
     },
     async holdBudgetForNextMonth(
@@ -2874,13 +2960,23 @@ export function createActualBudgetGateway(
         throw new Error(`Unsupported manageAccounts action: ${String(input.action)}`);
       });
     },
-    async runBankSync(accountId?: string): Promise<RunBankSyncResult> {
+    async runBankSync(account?: string): Promise<RunBankSyncResult> {
       return executeWrite(async (apiAdapter) => {
         if (!apiAdapter.runBankSync) {
           throw new Error('runBankSync is not supported by the current API adapter');
         }
-        const raw = (await (accountId !== undefined
-          ? apiAdapter.runBankSync({ accountId })
+        let resolvedAccountId: string | undefined;
+        if (account !== undefined && account.trim() !== '') {
+          const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+          const resolvedAccount = await resolveAccountReference(
+            account,
+            cacheSource,
+          );
+          resolvedAccountId = resolvedAccount.id;
+        }
+
+        const raw = (await (resolvedAccountId !== undefined
+          ? apiAdapter.runBankSync({ accountId: resolvedAccountId })
           : apiAdapter.runBankSync())) as
           | {
               updatedAccounts?: string[];

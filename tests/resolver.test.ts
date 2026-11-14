@@ -7,10 +7,13 @@ import {
   findSuggestions,
   isUuid,
   resolveAccount,
+  resolveAccountReference,
   resolveCategory,
   resolveCategoryGroup,
+  resolveCategoryReference,
   resolveEntityByNameOrId,
   resolvePayee,
+  resolvePayeeReference,
   resolveSchedule,
 } from '../src/gateway/resolver.js';
 import type {
@@ -398,6 +401,63 @@ describe('Identifier Resolution & Standardized Response Envelope', () => {
         'whole foods market': '77777777-7777-4777-8777-777777777777',
         'main checking': '88888888-8888-4888-8888-888888888888',
       });
+    });
+  });
+
+  describe('Polymorphic entity reference resolution helpers', () => {
+    it('resolves category references from name or alias categoryId', async () => {
+      const listCategories = vi.fn(async () => SAMPLE_CATEGORY_GROUPS);
+      const resByName = await resolveCategoryReference({ category: 'groceries' }, { listCategories });
+      expect(resByName.id).toBe('22222222-2222-4222-8222-222222222222');
+      expect(resByName.matchedBy).toBe('name');
+
+      const resById = await resolveCategoryReference(
+        { categoryId: '22222222-2222-4222-8222-222222222222' },
+        { listCategories },
+      );
+      expect(resById.id).toBe('22222222-2222-4222-8222-222222222222');
+      expect(resById.matchedBy).toBe('uuid');
+    });
+
+    it('resolves account references from name or alias accountId', async () => {
+      const listAccounts = vi.fn(async () => [
+        {
+          id: '88888888-8888-4888-8888-888888888888',
+          name: 'Checking',
+          offbudget: false,
+          closed: false,
+          balance: 0,
+        },
+      ]);
+      const resByName = await resolveAccountReference({ account: 'checking' }, { listAccounts });
+      expect(resByName.id).toBe('88888888-8888-4888-8888-888888888888');
+
+      const resById = await resolveAccountReference(
+        { accountId: '88888888-8888-4888-8888-888888888888' },
+        { listAccounts },
+      );
+      expect(resById.id).toBe('88888888-8888-4888-8888-888888888888');
+    });
+
+    it('resolves payee references from name or alias payeeId', async () => {
+      const listPayees = vi.fn(async () => [
+        { id: '77777777-7777-4777-8777-777777777777', name: 'Starbucks', transfer_acct: null },
+      ]);
+      const resByName = await resolvePayeeReference({ payee: 'starbucks' }, { listPayees });
+      expect(resByName.id).toBe('77777777-7777-4777-8777-777777777777');
+
+      const resById = await resolvePayeeReference(
+        { payeeId: '77777777-7777-4777-8777-777777777777' },
+        { listPayees },
+      );
+      expect(resById.id).toBe('77777777-7777-4777-8777-777777777777');
+    });
+
+    it('fails fast with suggestions when name cannot be found', async () => {
+      const listCategories = vi.fn(async () => SAMPLE_CATEGORY_GROUPS);
+      await expect(
+        resolveCategoryReference({ category: 'Grocries' }, { listCategories }),
+      ).rejects.toThrow(EntityResolutionError);
     });
   });
 });

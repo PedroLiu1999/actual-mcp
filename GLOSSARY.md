@@ -74,6 +74,10 @@ _Avoid_: Trigger, automation script, webhook
 
 ### Access & Transport
 
+**Entity Resolver**:
+The in-process identifier resolution mechanism within the Budget Gateway that translates human-readable names or storage UUIDs against the local Budget Cache, eliminating prerequisite lookup queries for callers.
+_Avoid_: Name lookup service, ID mapper, entity searcher
+
 **Resource Facade**:
 An MCP tool that consolidates entity lifecycle operations (create, update, delete, merge, move) for a domain entity cluster behind a single discriminated action interface with in-process identifier resolution.
 _Avoid_: CRUD tool, sub-resource endpoint, mutation router

@@ -554,3 +554,54 @@ export async function resolveSchedule(
   );
 }
 
+function extractRequiredReference(
+  value: string | undefined,
+  entityType: ResolvableEntityType,
+): string {
+  if (!value || !value.trim()) {
+    throw new EntityResolutionError({
+      entityType,
+      input: '',
+      suggestions: [],
+    });
+  }
+  return value;
+}
+
+export async function resolveCategoryReference(
+  ref: { category?: string; categoryId?: string } | string,
+  source: BudgetCacheSource,
+  resolved?: Record<string, string>,
+): Promise<ResolvedEntity<CategorySummary>> {
+  const value = extractRequiredReference(
+    typeof ref === 'string' ? ref : (ref.category ?? ref.categoryId),
+    'category',
+  );
+  return resolveCategory(value, source, resolved);
+}
+
+export async function resolveAccountReference(
+  ref: { account?: string; accountId?: string } | string,
+  source: BudgetCacheSource,
+  resolved?: Record<string, string>,
+): Promise<ResolvedEntity<AccountSummary | { id: string; name: string }>> {
+  const value = extractRequiredReference(
+    typeof ref === 'string' ? ref : (ref.account ?? ref.accountId),
+    'account',
+  );
+  return resolveAccount(value, source, resolved);
+}
+
+export async function resolvePayeeReference(
+  ref: { payee?: string; payeeId?: string } | string,
+  source: BudgetCacheSource,
+  resolved?: Record<string, string>,
+): Promise<ResolvedEntity<PayeeSummary>> {
+  const value = extractRequiredReference(
+    typeof ref === 'string' ? ref : (ref.payee ?? ref.payeeId),
+    'payee',
+  );
+  return resolvePayee(value, source, resolved);
+}
+
+

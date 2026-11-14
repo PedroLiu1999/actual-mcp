@@ -1468,6 +1468,13 @@ describe('BudgetGateway seam — category and category group mutations & cache i
       const fakeApi: ActualApiAdapter = {
         getAccounts: async () => [],
         getAccountBalance: async () => 0,
+        getCategoryGroups: async () => [
+          {
+            id: 'grp-living',
+            name: 'Living',
+            categories: [{ id: 'cat-food', name: 'Food', group_id: 'grp-living' }],
+          },
+        ],
         sync: async () => {
           events.push('api:sync');
         },
@@ -1654,7 +1661,7 @@ describe('BudgetGateway seam — category and category group mutations & cache i
       const events: string[] = [];
       let capturedArgs: unknown;
       const fakeApi: ActualApiAdapter = {
-        getAccounts: async () => [],
+        getAccounts: async () => [{ id: 'acct-checking', name: 'Checking' }],
         getAccountBalance: async () => 0,
         sync: async () => {
           events.push('api:sync');
@@ -1710,7 +1717,7 @@ describe('BudgetGateway seam — category and category group mutations & cache i
 
     it('maps raw.updatedAccounts properly without false fallback to [accountId]', async () => {
       const fakeApi: ActualApiAdapter = {
-        getAccounts: async () => [],
+        getAccounts: async () => [{ id: 'acct-not-updated', name: 'Not Updated' }],
         getAccountBalance: async () => 0,
         sync: async () => {},
         runBankSync: async () => {

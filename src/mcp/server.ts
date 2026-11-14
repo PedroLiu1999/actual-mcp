@@ -6,7 +6,10 @@ import {
   structuredAqlQueryInputSchema,
   structuredAqlQueryObjectSchema,
 } from '../gateway/aql.js';
-import { createResourceFacadeErrorResponse } from '../gateway/resolver.js';
+import {
+  createResourceFacadeErrorResponse,
+  EntityResolutionError,
+} from '../gateway/resolver.js';
 import type { BudgetGateway, ManageTransactionsInput } from '../gateway/types.js';
 
 const isoDateSchema = z
@@ -49,6 +52,38 @@ async function executeResourceFacadeTool(
         },
       ],
     };
+  }
+}
+
+async function executeWithResolutionErrorHandling(
+  operation: () => Promise<unknown>,
+): Promise<{
+  isError?: boolean;
+  content: Array<{ type: 'text'; text: string }>;
+}> {
+  try {
+    const result = await operation();
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  } catch (error) {
+    if (error instanceof EntityResolutionError) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(createResourceFacadeErrorResponse(error), null, 2),
+          },
+        ],
+      };
+    }
+    throw error;
   }
 }
 
@@ -177,17 +212,44 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     {
       title: 'Get Transactions',
       description:
-        'Query transactions with optional filters (accountId, startDate, endDate, categoryId, payeeId, case-insensitive searchText matching payee name or notes, limit default 100 max 500, and forceSync). Returns enriched records with Decimal Amounts and resolved accountName, categoryName, and payeeName alongside their IDs.',
+        'Query transactions with optional filters (account, category, payee accepting names or UUIDs, with accountId, categoryId, payeeId preserved as aliases, startDate, endDate, case-insensitive searchText matching payee name or notes, limit default 100 max 500, and forceSync). Returns enriched records with Decimal Amounts and resolved accountName, categoryName, and payeeName alongside their IDs.',
       inputSchema: {
-        accountId: z.string().optional().describe('Filter by account ID.'),
+        account: z
+          .string()
+          .optional()
+          .describe('Filter by account name or account UUID.'),
+        accountId: z
+          .string()
+          .optional()
+          .describe(
+            'Filter by account UUID or name (backward-compatible alias for account).',
+          ),
         startDate: isoDateSchema
           .optional()
           .describe('Inclusive start date in YYYY-MM-DD format.'),
         endDate: isoDateSchema
           .optional()
           .describe('Inclusive end date in YYYY-MM-DD format.'),
-        categoryId: z.string().optional().describe('Filter by category ID.'),
-        payeeId: z.string().optional().describe('Filter by payee ID.'),
+        category: z
+          .string()
+          .optional()
+          .describe('Filter by category name or category UUID.'),
+        categoryId: z
+          .string()
+          .optional()
+          .describe(
+            'Filter by category UUID or name (backward-compatible alias for category).',
+          ),
+        payee: z
+          .string()
+          .optional()
+          .describe('Filter by payee name or payee UUID.'),
+        payeeId: z
+          .string()
+          .optional()
+          .describe(
+            'Filter by payee UUID or name (backward-compatible alias for payee).',
+          ),
         searchText: z
           .string()
           .optional()
@@ -211,18 +273,13 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     },
     async (args) => {
       const filter = stripUndefined(args);
-      const transactions =
-        (await budgetGateway.getTransactions?.(
-          Object.keys(filter).length > 0 ? filter : undefined,
-        )) ?? [];
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({ transactions }, null, 2),
-          },
-        ],
-      };
+      return executeWithResolutionErrorHandling(async () => {
+        const transactions =
+          (await budgetGateway.getTransactions?.(
+            Object.keys(filter).length > 0 ? filter : undefined,
+          )) ?? [];
+        return { transactions };
+      });
     },
   );
 
@@ -692,10 +749,18 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
         month: budgetMonthSchema.describe(
           'Target Budget Month in YYYY-MM format (e.g. 2026-11).',
         ),
+        category: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target category name or category UUID.'),
         categoryId: z
           .string()
           .min(1)
-          .describe('Target category UUID.'),
+          .optional()
+          .describe(
+            'Target category UUID or name (backward-compatible alias for category).',
+          ),
         budgeted: z
           .number()
           .finite()
@@ -715,31 +780,32 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
         destructiveHint: false,
       },
     },
-    async ({ month, categoryId, budgeted, carryover }) => {
+    async ({ month, category, categoryId, budgeted, carryover }) => {
       if (budgeted === undefined && carryover === undefined) {
         throw new Error(
           'set_budget_amount requires at least one of budgeted or carryover',
         );
       }
-      if (!budgetGateway.setBudgetAmount) {
+      if (!category?.trim() && !categoryId?.trim()) {
+        throw new Error(
+          'set_budget_amount requires category or categoryId',
+        );
+      }
+      const setBudgetAmount = budgetGateway.setBudgetAmount;
+      if (!setBudgetAmount) {
         throw new Error(
           'setBudgetAmount is not supported by the configured BudgetGateway',
         );
       }
-      const result = await budgetGateway.setBudgetAmount({
-        month,
-        categoryId,
-        ...(budgeted !== undefined ? { budgeted } : {}),
-        ...(carryover !== undefined ? { carryover } : {}),
-      });
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
+      return executeWithResolutionErrorHandling(() =>
+        setBudgetAmount({
+          month,
+          ...(category !== undefined ? { category } : {}),
+          ...(categoryId !== undefined ? { categoryId } : {}),
+          ...(budgeted !== undefined ? { budgeted } : {}),
+          ...(carryover !== undefined ? { carryover } : {}),
+        }),
+      );
     },
   );
 
@@ -1027,14 +1093,21 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     {
       title: 'Run Bank Sync',
       description:
-        'Trigger bank synchronization for a specific linked account or all linked accounts when accountId is omitted. Returns updated account IDs, new and matched transaction counts, and any sync errors.',
+        'Trigger bank synchronization for a specific linked account (by name or UUID) or all linked accounts when omitted. Returns updated account IDs, new and matched transaction counts, and any sync errors.',
       inputSchema: {
+        account: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Optional account name or UUID to synchronize. When omitted, synchronizes all linked accounts.',
+          ),
         accountId: z
           .string()
           .min(1)
           .optional()
           .describe(
-            'Optional account ID to synchronize. When omitted, synchronizes all linked accounts.',
+            'Optional backward-compatible alias for account (account name or UUID).',
           ),
       },
       annotations: {
@@ -1043,20 +1116,14 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
       },
     },
     async (args) => {
-      if (!budgetGateway.runBankSync) {
+      const runBankSync = budgetGateway.runBankSync;
+      if (!runBankSync) {
         throw new Error(
           'runBankSync is not supported by the configured BudgetGateway',
         );
       }
-      const result = await budgetGateway.runBankSync(args.accountId);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
+      const accountRef = args.account ?? args.accountId;
+      return executeWithResolutionErrorHandling(() => runBankSync(accountRef));
     },
   );
 
@@ -1070,7 +1137,18 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
         month: budgetMonthSchema.describe(
           'Target Budget Month in YYYY-MM format (e.g. 2026-11).',
         ),
-        categoryId: z.string().min(1).describe('Target category UUID.'),
+        category: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target category name or category UUID.'),
+        categoryId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Target category UUID or name (backward-compatible alias for category).',
+          ),
         carryover: z
           .boolean()
           .describe(
@@ -1082,25 +1160,42 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
         destructiveHint: false,
       },
     },
-    async ({ month, categoryId, carryover }) => {
-      if (!budgetGateway.setBudgetCarryover) {
+    async ({ month, category, categoryId, carryover }) => {
+      const targetCategory = (category ?? categoryId)?.trim();
+      if (!targetCategory) {
+        throw new Error(
+          'set_budget_carryover requires category or categoryId',
+        );
+      }
+      const setBudgetCarryover = budgetGateway.setBudgetCarryover;
+      if (!setBudgetCarryover) {
         throw new Error(
           'setBudgetCarryover is not supported by the configured BudgetGateway',
         );
       }
-      await budgetGateway.setBudgetCarryover(month, categoryId, carryover);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              { success: true, month, categoryId, carryover },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
+      return executeWithResolutionErrorHandling(async () => {
+        const result = await setBudgetCarryover(
+          month,
+          targetCategory,
+          carryover,
+        );
+        return result
+          ? {
+              success: true,
+              month: result.month,
+              categoryId: result.categoryId,
+              ...(result.categoryName
+                ? { categoryName: result.categoryName }
+                : {}),
+              carryover: result.carryover,
+            }
+          : {
+              success: true,
+              month,
+              categoryId: targetCategory,
+              carryover,
+            };
+      });
     },
   );
 

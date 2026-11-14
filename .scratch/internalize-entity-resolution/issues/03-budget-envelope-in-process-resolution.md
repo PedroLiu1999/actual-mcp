@@ -4,10 +4,10 @@
 
 **Blocked by:** 01: Entity Resolver Gateway Seam Prefactoring & Polymorphic Types
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `set_budget_amount` and `set_budget_carryover` MCP tool schemas accept `category` as primary input (accepting category name or UUID), retaining `categoryId` as a backward-compatible alias.
-- [ ] Gateway resolves category name in-process against the local Budget Cache before applying monthly budget updates.
-- [ ] Both tools return `categoryName` on `previous` and `updated` envelope state objects in their response payloads.
-- [ ] Misspelled or non-existent category names fail fast with `EntityResolutionError` and fuzzy suggestions.
-- [ ] End-to-end MCP tool tests verify setting envelope budgeted amount and carryover by category name and by category UUID.
+- [x] `set_budget_amount` and `set_budget_carryover` MCP tool schemas accept `category` as primary input (accepting category name or UUID), retaining `categoryId` as a backward-compatible alias.
+- [x] Gateway resolves category name in-process against the local Budget Cache before applying monthly budget updates.
+- [x] Both tools return `categoryName` on `previous` and `updated` envelope state objects in their response payloads.
+- [x] Misspelled or non-existent category names fail fast with `EntityResolutionError` and fuzzy suggestions.
+- [x] End-to-end MCP tool tests verify setting envelope budgeted amount and carryover by category name and by category UUID.

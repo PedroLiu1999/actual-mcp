@@ -737,10 +737,18 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
         month: budgetMonthSchema.describe(
           'Target Budget Month in YYYY-MM format (e.g. 2026-11).',
         ),
+        category: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target category name or category UUID.'),
         categoryId: z
           .string()
           .min(1)
-          .describe('Target category UUID.'),
+          .optional()
+          .describe(
+            'Target category UUID or name (backward-compatible alias for category).',
+          ),
         budgeted: z
           .number()
           .finite()
@@ -760,10 +768,15 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
         destructiveHint: false,
       },
     },
-    async ({ month, categoryId, budgeted, carryover }) => {
+    async ({ month, category, categoryId, budgeted, carryover }) => {
       if (budgeted === undefined && carryover === undefined) {
         throw new Error(
           'set_budget_amount requires at least one of budgeted or carryover',
+        );
+      }
+      if (!category?.trim() && !categoryId?.trim()) {
+        throw new Error(
+          'set_budget_amount requires category or categoryId',
         );
       }
       if (!budgetGateway.setBudgetAmount) {
@@ -771,20 +784,36 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           'setBudgetAmount is not supported by the configured BudgetGateway',
         );
       }
-      const result = await budgetGateway.setBudgetAmount({
-        month,
-        categoryId,
-        ...(budgeted !== undefined ? { budgeted } : {}),
-        ...(carryover !== undefined ? { carryover } : {}),
-      });
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
+      try {
+        const result = await budgetGateway.setBudgetAmount({
+          month,
+          ...(category !== undefined ? { category } : {}),
+          ...(categoryId !== undefined ? { categoryId } : {}),
+          ...(budgeted !== undefined ? { budgeted } : {}),
+          ...(carryover !== undefined ? { carryover } : {}),
+        });
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        if (error instanceof EntityResolutionError) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(createResourceFacadeErrorResponse(error), null, 2),
+              },
+            ],
+          };
+        }
+        throw error;
+      }
     },
   );
 
@@ -1115,7 +1144,18 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
         month: budgetMonthSchema.describe(
           'Target Budget Month in YYYY-MM format (e.g. 2026-11).',
         ),
-        categoryId: z.string().min(1).describe('Target category UUID.'),
+        category: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Target category name or category UUID.'),
+        categoryId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Target category UUID or name (backward-compatible alias for category).',
+          ),
         carryover: z
           .boolean()
           .describe(
@@ -1127,25 +1167,65 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
         destructiveHint: false,
       },
     },
-    async ({ month, categoryId, carryover }) => {
+    async ({ month, category, categoryId, carryover }) => {
+      const targetCategory = (category ?? categoryId)?.trim();
+      if (!targetCategory) {
+        throw new Error(
+          'set_budget_carryover requires category or categoryId',
+        );
+      }
       if (!budgetGateway.setBudgetCarryover) {
         throw new Error(
           'setBudgetCarryover is not supported by the configured BudgetGateway',
         );
       }
-      await budgetGateway.setBudgetCarryover(month, categoryId, carryover);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              { success: true, month, categoryId, carryover },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
+      try {
+        const result = await budgetGateway.setBudgetCarryover(
+          month,
+          targetCategory,
+          carryover,
+        );
+        const payload = result
+          ? {
+              success: true,
+              month: result.month,
+              categoryId: result.categoryId,
+              ...(result.categoryName
+                ? { categoryName: result.categoryName }
+                : {}),
+              carryover: result.carryover,
+              ...(result.previousCarryover !== undefined
+                ? { previousCarryover: result.previousCarryover }
+                : {}),
+            }
+          : {
+              success: true,
+              month,
+              categoryId: targetCategory,
+              carryover,
+            };
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(payload, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        if (error instanceof EntityResolutionError) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(createResourceFacadeErrorResponse(error), null, 2),
+              },
+            ],
+          };
+        }
+        throw error;
+      }
     },
   );
 

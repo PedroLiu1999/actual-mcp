@@ -55,6 +55,38 @@ async function executeResourceFacadeTool(
   }
 }
 
+async function executeWithResolutionErrorHandling(
+  operation: () => Promise<unknown>,
+): Promise<{
+  isError?: boolean;
+  content: Array<{ type: 'text'; text: string }>;
+}> {
+  try {
+    const result = await operation();
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  } catch (error) {
+    if (error instanceof EntityResolutionError) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(createResourceFacadeErrorResponse(error), null, 2),
+          },
+        ],
+      };
+    }
+    throw error;
+  }
+}
+
 const scheduleAmountSchema = z.union([
   z
     .number()
@@ -241,33 +273,13 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
     },
     async (args) => {
       const filter = stripUndefined(args);
-      try {
+      return executeWithResolutionErrorHandling(async () => {
         const transactions =
           (await budgetGateway.getTransactions?.(
             Object.keys(filter).length > 0 ? filter : undefined,
           )) ?? [];
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({ transactions }, null, 2),
-            },
-          ],
-        };
-      } catch (error) {
-        if (error instanceof EntityResolutionError) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(createResourceFacadeErrorResponse(error), null, 2),
-              },
-            ],
-          };
-        }
-        throw error;
-      }
+        return { transactions };
+      });
     },
   );
 
@@ -779,41 +791,21 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           'set_budget_amount requires category or categoryId',
         );
       }
-      if (!budgetGateway.setBudgetAmount) {
+      const setBudgetAmount = budgetGateway.setBudgetAmount;
+      if (!setBudgetAmount) {
         throw new Error(
           'setBudgetAmount is not supported by the configured BudgetGateway',
         );
       }
-      try {
-        const result = await budgetGateway.setBudgetAmount({
+      return executeWithResolutionErrorHandling(() =>
+        setBudgetAmount({
           month,
           ...(category !== undefined ? { category } : {}),
           ...(categoryId !== undefined ? { categoryId } : {}),
           ...(budgeted !== undefined ? { budgeted } : {}),
           ...(carryover !== undefined ? { carryover } : {}),
-        });
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      } catch (error) {
-        if (error instanceof EntityResolutionError) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(createResourceFacadeErrorResponse(error), null, 2),
-              },
-            ],
-          };
-        }
-        throw error;
-      }
+        }),
+      );
     },
   );
 
@@ -1124,36 +1116,14 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
       },
     },
     async (args) => {
-      if (!budgetGateway.runBankSync) {
+      const runBankSync = budgetGateway.runBankSync;
+      if (!runBankSync) {
         throw new Error(
           'runBankSync is not supported by the configured BudgetGateway',
         );
       }
       const accountRef = args.account ?? args.accountId;
-      try {
-        const result = await budgetGateway.runBankSync(accountRef);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      } catch (error) {
-        if (error instanceof EntityResolutionError) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(createResourceFacadeErrorResponse(error), null, 2),
-              },
-            ],
-          };
-        }
-        throw error;
-      }
+      return executeWithResolutionErrorHandling(() => runBankSync(accountRef));
     },
   );
 
@@ -1197,18 +1167,19 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
           'set_budget_carryover requires category or categoryId',
         );
       }
-      if (!budgetGateway.setBudgetCarryover) {
+      const setBudgetCarryover = budgetGateway.setBudgetCarryover;
+      if (!setBudgetCarryover) {
         throw new Error(
           'setBudgetCarryover is not supported by the configured BudgetGateway',
         );
       }
-      try {
-        const result = await budgetGateway.setBudgetCarryover(
+      return executeWithResolutionErrorHandling(async () => {
+        const result = await setBudgetCarryover(
           month,
           targetCategory,
           carryover,
         );
-        const payload = result
+        return result
           ? {
               success: true,
               month: result.month,
@@ -1217,9 +1188,6 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
                 ? { categoryName: result.categoryName }
                 : {}),
               carryover: result.carryover,
-              ...(result.previousCarryover !== undefined
-                ? { previousCarryover: result.previousCarryover }
-                : {}),
             }
           : {
               success: true,
@@ -1227,28 +1195,7 @@ export function createMcpServer(budgetGateway: BudgetGateway, _publicUrl?: strin
               categoryId: targetCategory,
               carryover,
             };
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(payload, null, 2),
-            },
-          ],
-        };
-      } catch (error) {
-        if (error instanceof EntityResolutionError) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(createResourceFacadeErrorResponse(error), null, 2),
-              },
-            ],
-          };
-        }
-        throw error;
-      }
+      });
     },
   );
 

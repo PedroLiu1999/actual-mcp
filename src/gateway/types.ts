@@ -78,6 +78,7 @@ export interface PayeeSummary {
 export interface BudgetMonthCategorySummary {
   id: string;
   name: string;
+  categoryName?: string;
   group_id: string;
   is_income: boolean;
   hidden: boolean;
@@ -267,24 +268,11 @@ export interface SetBudgetAmountResult {
   updated: BudgetMonthCategorySummary;
 }
 
-export interface SetBudgetCarryoverInput {
-  month: string;
-  category?: string;
-  categoryId?: string;
-  carryover: boolean;
-}
-
 export interface SetBudgetCarryoverResult {
   month: string;
   categoryId: string;
   categoryName?: string;
   carryover: boolean;
-  previousCarryover?: boolean;
-}
-
-export interface RunBankSyncInput {
-  account?: string;
-  accountId?: string;
 }
 
 export interface BudgetReadiness {

@@ -160,11 +160,13 @@ describe('Budget envelope in-process entity resolution', () => {
       previous: {
         id: groceriesId,
         name: 'Groceries',
+        categoryName: 'Groceries',
         budgeted: 500,
       },
       updated: {
         id: groceriesId,
         name: 'Groceries',
+        categoryName: 'Groceries',
         budgeted: 600,
       },
     });
@@ -205,11 +207,13 @@ describe('Budget envelope in-process entity resolution', () => {
       previous: {
         id: diningOutId,
         name: 'Dining Out',
+        categoryName: 'Dining Out',
         budgeted: 150,
       },
       updated: {
         id: diningOutId,
         name: 'Dining Out',
+        categoryName: 'Dining Out',
         budgeted: 200,
       },
     });
@@ -285,11 +289,11 @@ describe('Budget envelope in-process entity resolution', () => {
       categoryId: diningOutId,
       categoryName: 'Dining Out',
       carryover: true,
-      previousCarryover: false,
     });
+    expect(parsed.previousCarryover).toBeUndefined();
   });
 
-  it('sets budget carryover by category UUID and returns categoryName', async () => {
+  it('sets budget carryover by category UUID without fetching category groups', async () => {
     const gateway = createTestGateway();
     const app = createApp({ config: testConfig, budgetGateway: gateway });
     const token = await issueBearerToken(app);
@@ -321,10 +325,9 @@ describe('Budget envelope in-process entity resolution', () => {
       success: true,
       month: '2026-11',
       categoryId: groceriesId,
-      categoryName: 'Groceries',
       carryover: true,
-      previousCarryover: false,
     });
+    expect(parsed.previousCarryover).toBeUndefined();
   });
 
   it('fails fast with EntityResolutionError and fuzzy suggestions on misspelled category in set_budget_carryover', async () => {

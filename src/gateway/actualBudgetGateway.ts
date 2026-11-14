@@ -53,11 +53,9 @@ import type {
   ManageTransactionsInput,
   PayeeSummary,
   ResourceFacadeResult,
-  RunBankSyncInput,
   RunBankSyncResult,
   SetBudgetAmountInput,
   SetBudgetAmountResult,
-  SetBudgetCarryoverInput,
   SetBudgetCarryoverResult,
   SpendingSummary,
   SpendingSummaryGroup,
@@ -1187,27 +1185,32 @@ export function createActualBudgetGateway(
       return executeRead(
         async (apiAdapter) => {
           const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
+          const resolveOptionalId = async (
+            raw: string | undefined,
+            resolver: (
+              value: string,
+              source: typeof cacheSource,
+            ) => Promise<{ id: string }>,
+          ): Promise<string | undefined> => {
+            if (raw === undefined || raw.trim() === '') {
+              return undefined;
+            }
+            const resolved = await resolver(raw, cacheSource);
+            return resolved.id;
+          };
 
-          let resolvedAccountId: string | undefined;
-          const rawAccount = filter?.account ?? filter?.accountId;
-          if (rawAccount !== undefined && rawAccount.trim() !== '') {
-            const res = await resolveAccountReference(rawAccount, cacheSource);
-            resolvedAccountId = res.id;
-          }
-
-          let resolvedCategoryId: string | undefined;
-          const rawCategory = filter?.category ?? filter?.categoryId;
-          if (rawCategory !== undefined && rawCategory.trim() !== '') {
-            const res = await resolveCategoryReference(rawCategory, cacheSource);
-            resolvedCategoryId = res.id;
-          }
-
-          let resolvedPayeeId: string | undefined;
-          const rawPayee = filter?.payee ?? filter?.payeeId;
-          if (rawPayee !== undefined && rawPayee.trim() !== '') {
-            const res = await resolvePayeeReference(rawPayee, cacheSource);
-            resolvedPayeeId = res.id;
-          }
+          const resolvedAccountId = await resolveOptionalId(
+            filter?.account ?? filter?.accountId,
+            resolveAccountReference,
+          );
+          const resolvedCategoryId = await resolveOptionalId(
+            filter?.category ?? filter?.categoryId,
+            resolveCategoryReference,
+          );
+          const resolvedPayeeId = await resolveOptionalId(
+            filter?.payee ?? filter?.payeeId,
+            resolvePayeeReference,
+          );
 
           const enriched = await fetchEnrichedTransactions(
             apiAdapter,
@@ -1879,11 +1882,11 @@ export function createActualBudgetGateway(
           ...(categoryName ? { categoryName } : {}),
           previous: {
             ...previous,
-            ...(categoryName ? { name: categoryName } : {}),
+            ...(categoryName ? { name: categoryName, categoryName } : {}),
           },
           updated: {
             ...updated,
-            ...(categoryName ? { name: categoryName } : {}),
+            ...(categoryName ? { name: categoryName, categoryName } : {}),
           },
         };
       });
@@ -2469,22 +2472,11 @@ export function createActualBudgetGateway(
       });
     },
     async setBudgetCarryover(
-      monthOrInput: string | SetBudgetCarryoverInput,
-      categoryIdArg?: string,
-      carryoverArg?: boolean,
+      month: string,
+      category: string,
+      carryover: boolean,
     ): Promise<SetBudgetCarryoverResult> {
-      const month =
-        typeof monthOrInput === 'string' ? monthOrInput : monthOrInput.month;
-      const rawCategory =
-        typeof monthOrInput === 'string'
-          ? categoryIdArg
-          : (monthOrInput.category ?? monthOrInput.categoryId);
-      const carryover =
-        typeof monthOrInput === 'string'
-          ? Boolean(carryoverArg)
-          : monthOrInput.carryover;
-
-      if (!rawCategory || !rawCategory.trim()) {
+      if (!category.trim()) {
         throw new Error('setBudgetCarryover requires category or categoryId');
       }
 
@@ -2494,21 +2486,11 @@ export function createActualBudgetGateway(
         }
         const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
         const resolvedCategory = await resolveCategoryReference(
-          rawCategory,
+          category,
           cacheSource,
         );
         const categoryId = resolvedCategory.id;
-
-        let previousCarryover: boolean | undefined;
-        let categoryName = resolvedCategory.name ?? resolvedCategory.entity?.name;
-        if (apiAdapter.getBudgetMonth) {
-          const beforeMonth = await fetchBudgetMonthSummary(apiAdapter, month);
-          const prevCategory = beforeMonth.categories.find((c) => c.id === categoryId);
-          previousCarryover = prevCategory ? prevCategory.carryover : undefined;
-          if (!categoryName && prevCategory?.name) {
-            categoryName = prevCategory.name;
-          }
-        }
+        const categoryName = resolvedCategory.name;
 
         await apiAdapter.setBudgetCarryover(month, categoryId, carryover);
 
@@ -2517,7 +2499,6 @@ export function createActualBudgetGateway(
           categoryId,
           ...(categoryName ? { categoryName } : {}),
           carryover,
-          ...(previousCarryover !== undefined ? { previousCarryover } : {}),
         };
       });
     },
@@ -2979,23 +2960,16 @@ export function createActualBudgetGateway(
         throw new Error(`Unsupported manageAccounts action: ${String(input.action)}`);
       });
     },
-    async runBankSync(
-      accountOrInput?: string | RunBankSyncInput,
-    ): Promise<RunBankSyncResult> {
-      const rawAccount =
-        typeof accountOrInput === 'string'
-          ? accountOrInput
-          : (accountOrInput?.account ?? accountOrInput?.accountId);
-
+    async runBankSync(account?: string): Promise<RunBankSyncResult> {
       return executeWrite(async (apiAdapter) => {
         if (!apiAdapter.runBankSync) {
           throw new Error('runBankSync is not supported by the current API adapter');
         }
         let resolvedAccountId: string | undefined;
-        if (rawAccount !== undefined && rawAccount.trim() !== '') {
+        if (account !== undefined && account.trim() !== '') {
           const cacheSource = createMemoizedBudgetCacheSource(apiAdapter);
           const resolvedAccount = await resolveAccountReference(
-            rawAccount,
+            account,
             cacheSource,
           );
           resolvedAccountId = resolvedAccount.id;

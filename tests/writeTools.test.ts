@@ -625,6 +625,7 @@ describe('BudgetGateway seam — createActualBudgetGateway setBudgetAmount', () 
       previous: {
         id: 'cat-groceries',
         name: 'Groceries',
+        categoryName: 'Groceries',
         group_id: 'grp-living',
         is_income: false,
         hidden: false,
@@ -636,6 +637,7 @@ describe('BudgetGateway seam — createActualBudgetGateway setBudgetAmount', () 
       updated: {
         id: 'cat-groceries',
         name: 'Groceries',
+        categoryName: 'Groceries',
         group_id: 'grp-living',
         is_income: false,
         hidden: false,
@@ -682,14 +684,14 @@ describe('BudgetGateway seam — createActualBudgetGateway setBudgetAmount', () 
       { step: 'sync' },
     ]);
 
-    // Throws clear error if category ID does not exist in the budget month
+    // Throws clear error if category ID does not exist
     await expect(
       gateway.setBudgetAmount({
         month: '2026-11',
         categoryId: 'cat-missing',
         budgeted: 100,
       }),
-    ).rejects.toThrow(/Category not found.*cat-missing/i);
+    ).rejects.toThrow(/Category "cat-missing" not found\./);
   });
 });
 
